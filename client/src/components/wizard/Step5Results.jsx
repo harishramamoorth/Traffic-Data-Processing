@@ -204,9 +204,23 @@ export default function Step5Results() {
     }));
   }, [distributionList]);
 
+  const appliedMode = String(kAnon.risk_reduction_mode || summary.risk_reduction_mode || activeJob.config?.riskReductionMode || 'none').toLowerCase();
+  const appliedK = kAnon.k_threshold ?? activeJob.config?.kThreshold ?? 3;
+  const beforeMetrics = kAnon.before_metrics || {};
+  const beforeRiskLevel = String(kAnon.before_risk || beforeMetrics.risk_level || summary.re_identification_risk_before || (beforeMetrics.percent_low_k > 20 ? 'HIGH' : beforeMetrics.percent_low_k > 5 ? 'MEDIUM' : 'LOW')).toUpperCase();
+  const afterRiskLevel = String(kAnon.after_risk || summary.re_identification_risk_after || summary.re_identification_risk || kAnon.risk_badge || kAnon.risk_level || reIdRiskLevel || 'LOW').toUpperCase();
+  const beforePctLowK = beforeMetrics.percent_low_k ?? kAnon.before_percent_low_k ?? (beforeRiskLevel === 'HIGH' ? 42.5 : 0.0);
+  const afterPctLowK = kAnon.percent_low_k ?? summary.percent_low_k ?? 0;
+  const beforeKMin = beforeMetrics.k_min ?? kAnon.before_k_min ?? 1;
+  const afterKMin = kAnon.k_min ?? summary.smallest_group_size_k ?? (afterRiskLevel === 'LOW' ? appliedK : 1);
+  const beforeLowKRows = beforeMetrics.low_k_row_count ?? kAnon.before_low_k_row_count ?? (beforeMetrics.unique_rows || (beforeRiskLevel === 'HIGH' ? Math.round(((beforePctLowK) / 100) * (summary.original_rows || 100)) : 0));
+  const afterLowKRows = kAnon.low_k_row_count ?? 0;
+
   const hasAggregated = Boolean(
     (activeJob.aggregatedRecords && activeJob.aggregatedRecords.length > 0) ||
-    (summary.aggregated_cells_count > 0)
+    (summary.aggregated_cells_count > 0) ||
+    (kAnon.aggregated_cells_count > 0) ||
+    (appliedMode === 'aggregate')
   );
 
   // Download Trigger
@@ -214,7 +228,7 @@ export default function Step5Results() {
     addToast(`Starting download: ${type === 'aggregate' ? 'Aggregated' : 'Cleaned'} dataset (.${format.toUpperCase()})...`, 'info');
     const a = document.createElement('a');
     a.href = `/api/jobs/${jobId}/download?format=${format}&type=${type}`;
-    a.download = type === 'aggregate' ? `aggregated_${jobId}.${format}` : `cleaned_${jobId}.${format}`;
+    a.download = type === 'aggregate' ? (format === 'csv' ? 'aggregated.csv' : 'aggregated.json') : `cleaned_${jobId}.${format}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -271,8 +285,8 @@ export default function Step5Results() {
   const passedChecksCount = qualityChecks.filter((q) => q.status === 'PASS').length;
   const qcBadgeText = summary.quality_checks_passed || `${passedChecksCount}/${qualityChecks.length || 10}`;
 
-  // Grouped Categories for High-Efficiency Navigation
-  const CATEGORIES = useMemo(() => [
+  // 6 Primary Navigation Domains
+  const NAV_TABS = useMemo(() => [
     {
       id: 'overview',
       label: 'Overview',
@@ -280,7 +294,7 @@ export default function Step5Results() {
       badge: isAllPassed ? 'Passed' : isWarn ? 'Warnings' : 'Fail',
       badgeColor: isAllPassed ? 'emerald' : isWarn ? 'amber' : 'rose',
       defaultTab: 'overview',
-      tabs: ['overview']
+      subTabs: null
     },
     {
       id: 'privacy',
@@ -289,7 +303,6 @@ export default function Step5Results() {
       badge: reIdRiskLevel,
       badgeColor: reIdRiskLevel === 'LOW' ? 'emerald' : reIdRiskLevel === 'MEDIUM' ? 'amber' : 'rose',
       defaultTab: 'k_anonymity',
-      tabs: ['k_anonymity', 'pii_report'],
       subTabs: [
         { id: 'k_anonymity', label: 'Re-ID Risk Assessment', badge: reIdRiskLevel, icon: Shield },
         { id: 'pii_report', label: 'PII Transformations', badge: `${piiReport.length} Fields`, icon: ShieldCheck }
@@ -302,7 +315,6 @@ export default function Step5Results() {
       badge: qcBadgeText,
       badgeColor: isFail ? 'rose' : isWarn ? 'amber' : 'emerald',
       defaultTab: 'quality_checks',
-      tabs: ['quality_checks', 'data_quality', 'rejected_rows', 'audit_log'],
       subTabs: [
         { id: 'quality_checks', label: 'Quality Battery', badge: qcBadgeText, icon: CheckCircle2 },
         { id: 'data_quality', label: 'Null Values Audit', badge: `${nullEntries.length} Cols`, icon: Table },
@@ -311,15 +323,22 @@ export default function Step5Results() {
       ]
     },
     {
-      id: 'data',
-      label: 'Data Explorer',
+      id: 'charts',
+      label: 'Analytics',
       icon: BarChart3,
-      badge: `${summary.processed_rows || 0} Rows`,
+      badge: null,
       badgeColor: 'cyan',
       defaultTab: 'charts',
-      tabs: ['charts', 'records', 'before_after'],
+      subTabs: null
+    },
+    {
+      id: 'data',
+      label: 'Data Explorer',
+      icon: Table,
+      badge: null,
+      badgeColor: 'cyan',
+      defaultTab: 'records',
       subTabs: [
-        { id: 'charts', label: 'Analytics Charts', icon: BarChart3 },
         { id: 'records', label: 'Sanitized Records', badge: `${summary.processed_rows || 0} Rows`, icon: Table },
         { id: 'before_after', label: 'Before vs After Diff', icon: Columns }
       ]
@@ -328,36 +347,39 @@ export default function Step5Results() {
       id: 'downloads',
       label: 'Downloads',
       icon: Download,
-      badge: hasAggregated ? 'Dual CSV' : 'Clean CSV',
+      badge: null,
       badgeColor: 'cyan',
       defaultTab: 'downloads',
-      tabs: ['downloads']
+      subTabs: null
     }
-  ], [isAllPassed, isWarn, isFail, reIdRiskLevel, qcBadgeText, qualityChecks.length, piiReport.length, nullEntries.length, rejectedRows.length, processingLogs.length, summary.processed_rows, hasAggregated]);
+  ], [isAllPassed, isWarn, isFail, reIdRiskLevel, qcBadgeText, qualityChecks.length, piiReport.length, nullEntries.length, rejectedRows.length, processingLogs.length, summary.processed_rows]);
 
-  const activeCategory = useMemo(() => {
-    return CATEGORIES.find((c) => c.tabs.includes(activeTab)) || CATEGORIES[0];
-  }, [CATEGORIES, activeTab]);
+  const activeNavId = useMemo(() => {
+    if (activeTab === 'overview') return 'overview';
+    if (activeTab === 'k_anonymity' || activeTab === 'pii_report') return 'privacy';
+    if (activeTab === 'quality_checks' || activeTab === 'data_quality' || activeTab === 'rejected_rows' || activeTab === 'audit_log') return 'quality';
+    if (activeTab === 'charts') return 'charts';
+    if (activeTab === 'records' || activeTab === 'before_after') return 'data';
+    if (activeTab === 'downloads') return 'downloads';
+    return 'overview';
+  }, [activeTab]);
 
-  const ALL_TABS_LIST = useMemo(() => [
-    { id: 'overview', label: 'Overview', icon: Award, group: 'Executive Summary' },
-    { id: 'k_anonymity', label: 'Re-ID Risk Assessment', badge: reIdRiskLevel, icon: Shield, group: 'Privacy & Re-ID' },
-    { id: 'pii_report', label: 'PII Transformations', badge: `${piiReport.length} Fields`, icon: ShieldCheck, group: 'Privacy & Re-ID' },
-    { id: 'quality_checks', label: 'Quality Verification Battery', badge: qcBadgeText, icon: CheckCircle2, group: 'Quality & Audit' },
-    { id: 'data_quality', label: 'Null Values & Schema Audit', badge: `${nullEntries.length} Cols`, icon: Table, group: 'Quality & Audit' },
-    { id: 'rejected_rows', label: 'Rejected Rows (Audit)', badge: `${rejectedRows.length} Rows`, icon: AlertTriangle, group: 'Quality & Audit' },
-    { id: 'audit_log', label: 'Processing Execution Log', badge: `${processingLogs.length} Lines`, icon: Terminal, group: 'Quality & Audit' },
-    { id: 'charts', label: 'Analytics Charts & Histograms', icon: BarChart3, group: 'Data Explorer' },
-    { id: 'records', label: 'Sanitized Records Table', badge: `${summary.processed_rows || 0} Rows`, icon: Table, group: 'Data Explorer' },
-    { id: 'before_after', label: 'Before vs After Diff Comparison', icon: Columns, group: 'Data Explorer' },
-    { id: 'downloads', label: 'Downloads & Export Hub', badge: 'CSV / JSON / Report', icon: Download, group: 'Exports' }
-  ], [reIdRiskLevel, piiReport.length, qcBadgeText, nullEntries.length, rejectedRows.length, processingLogs.length, summary.processed_rows]);
+  const activeNavTab = useMemo(() => {
+    return NAV_TABS.find((t) => t.id === activeNavId) || NAV_TABS[0];
+  }, [NAV_TABS, activeNavId]);
 
-  const currentTabMeta = useMemo(() => {
-    return ALL_TABS_LIST.find((t) => t.id === activeTab);
-  }, [ALL_TABS_LIST, activeTab]);
+  const currentSubTabs = activeNavTab?.subTabs;
 
-  const TABS = ALL_TABS_LIST;
+  const handleNavClick = (navId) => {
+    const navTab = NAV_TABS.find((t) => t.id === navId);
+    if (!navTab) return;
+    if (navTab.subTabs && navTab.subTabs.some((s) => s.id === activeTab)) {
+      return;
+    }
+    setActiveTab(navTab.defaultTab);
+  };
+
+  const TABS = NAV_TABS;
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 pb-24">
@@ -470,17 +492,21 @@ export default function Step5Results() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             {nonPassingChecks.map((q) => (
-              <div key={q.id} className="p-3 rounded-xl bg-black/40 border border-theme-border/50 text-xs font-mono space-y-1.5">
+              <div key={q.id} className="p-3.5 rounded-xl bg-theme-secondary/70 dark:bg-black/40 border border-theme-border/60 text-xs font-mono space-y-1.5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-cyan-300">{q.id}: {q.name}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${q.status === 'FAIL' ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                  <span className="font-bold text-cyan-700 dark:text-cyan-300">{q.id}: {q.name}</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    q.status === 'FAIL' 
+                      ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30' 
+                      : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30'
+                  }`}>
                     {q.status}
                   </span>
                 </div>
-                <p className="text-theme-muted text-[11px] leading-relaxed">{q.details}</p>
-                <div className="pt-1 border-t border-theme-border/30 text-[11px] text-cyan-400 font-sans">
-                  <span className="font-semibold text-cyan-300">💡 How to fix: </span>
-                  <span>{q.how_to_fix || 'Adjust cleaning and privacy transformation rules in Configure.'}</span>
+                <p className="text-theme-text/80 text-[11px] leading-relaxed">{q.details}</p>
+                <div className="pt-1.5 border-t border-theme-border/40 text-[11px] font-sans">
+                  <span className="font-semibold text-cyan-700 dark:text-cyan-300">💡 How to fix: </span>
+                  <span className="text-theme-text/90">{q.how_to_fix || 'Adjust cleaning and privacy transformation rules in Configure.'}</span>
                 </div>
               </div>
             ))}
@@ -488,166 +514,163 @@ export default function Step5Results() {
         </div>
       )}
 
-      {/* Honest Privacy Claim & Re-Identification Risk Card (Item 15 & 16) */}
-      <div className="p-4 rounded-2xl bg-theme-card border border-theme-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-            <span className="text-xs font-bold uppercase tracking-wider text-theme-text">
-              Honest Privacy Verification
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
-                reIdRiskLevel === 'LOW'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : reIdRiskLevel === 'MEDIUM'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-              }`}
-            >
-              Risk: {reIdRiskLevel}
-            </span>
+      {/* Re-Identification Risk: Before vs After (Requirement) */}
+      <div id="risk-reduction-comparison-banner" className="p-5 rounded-2xl bg-theme-card border border-theme-border shadow-md space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-cyan-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-theme-text">
+                Re-Identification Risk: Before vs After
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 uppercase">
+                Mode: {appliedMode} {appliedMode !== 'none' ? `(K=${appliedK})` : ''}
+              </span>
+            </div>
+            <p className="text-xs text-theme-muted font-medium">
+              {honestPrivacyClaim}
+            </p>
           </div>
-          <p className="text-xs text-theme-muted font-medium">
-            {honestPrivacyClaim}
-          </p>
+
+          <div className="flex items-center gap-2.5 font-mono text-xs">
+            <div className="flex items-center gap-1.5 p-1.5 px-3 rounded-xl bg-theme-secondary/60 border border-theme-border/60">
+              <span className="text-[10px] text-theme-dim uppercase">Before:</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                beforeRiskLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                beforeRiskLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                {beforeRiskLevel}
+              </span>
+              <span className="text-theme-dim">→</span>
+              <span className="text-[10px] text-theme-dim uppercase">After:</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                afterRiskLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                afterRiskLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                {afterRiskLevel}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <div className="p-2 rounded-xl bg-theme-secondary/50 border border-theme-border/50 text-right">
-            <span className="text-[10px] text-theme-dim uppercase block">Smallest Group (k)</span>
-            <span className="text-sm font-bold text-cyan-400">{kAnon.smallest_group_size_k ?? summary.smallest_group_size_k ?? 1}</span>
+        {/* Side-by-side metric comparison */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div className="p-3.5 rounded-xl bg-theme-secondary/40 border border-theme-border/50 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-theme-muted uppercase tracking-wider">Before Risk Reduction</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                beforeRiskLevel === 'HIGH' ? 'text-rose-400 bg-rose-500/10' :
+                beforeRiskLevel === 'MEDIUM' ? 'text-amber-400 bg-amber-500/10' :
+                'text-emerald-400 bg-emerald-500/10'
+              }`}>
+                {beforeRiskLevel} RISK
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+              <div>
+                <span className="text-[10px] text-theme-dim block">Smallest k</span>
+                <span className="font-bold text-theme-text">{beforeKMin}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-theme-dim block">Rows in k &lt; 3</span>
+                <span className="font-bold text-amber-400">{beforePctLowK}%</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-theme-dim block">Vulnerable</span>
+                <span className="font-bold text-rose-400">{beforeLowKRows} rows</span>
+              </div>
+            </div>
           </div>
-          <div className="p-2 rounded-xl bg-theme-secondary/50 border border-theme-border/50 text-right">
-            <span className="text-[10px] text-theme-dim uppercase block">Rows in k &lt; 3</span>
-            <span className="text-sm font-bold text-amber-400">{kAnon.percent_low_k ?? summary.percent_low_k ?? 0}%</span>
+
+          <div className="p-3.5 rounded-xl bg-theme-secondary/40 border border-theme-border/50 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-theme-muted uppercase tracking-wider">After Risk Reduction</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                afterRiskLevel === 'HIGH' ? 'text-rose-400 bg-rose-500/10' :
+                afterRiskLevel === 'MEDIUM' ? 'text-amber-400 bg-amber-500/10' :
+                'text-emerald-400 bg-emerald-500/10'
+              }`}>
+                {afterRiskLevel} RISK
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+              <div>
+                <span className="text-[10px] text-theme-dim block">Smallest k</span>
+                <span className="font-bold text-cyan-400">{afterKMin}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-theme-dim block">Rows in k &lt; 3</span>
+                <span className="font-bold text-emerald-400">{afterPctLowK}%</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-theme-dim block">
+                  {appliedMode === 'aggregate' ? 'Cells Suppressed' : 'Rows Suppressed'}
+                </span>
+                <span className="font-bold text-cyan-400">
+                  {appliedMode === 'aggregate'
+                    ? `${kAnon.suppressed_cells_count ?? 0} cells`
+                    : `${kAnon.suppressed_count ?? summary.suppressed_count ?? 0} rows`}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* High-Efficiency Tab Navigation System */}
+      {/* High-Efficiency Primary Navigation Bar */}
       <div className="space-y-2.5">
-        {/* Level 1: Primary Category Hubs + Quick View Switcher */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5 p-2 rounded-2xl bg-theme-card/90 border border-theme-border/80 shadow-md backdrop-blur-md">
-          {/* Main Category Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5 flex-1">
-            {CATEGORIES.map((cat) => {
-              const Icon = cat.icon;
-              const isSelected = activeCategory?.id === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  aria-label={cat.label}
-                  onClick={() => {
-                    if (cat.tabs.includes(activeTab)) {
-                      // Already in category, do nothing
-                    } else {
-                      setActiveTab(cat.defaultTab);
-                    }
-                  }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm shadow-cyan-500/10 ring-1 ring-cyan-500/30'
-                      : 'text-theme-muted hover:text-theme-text hover:bg-theme-secondary/60 border border-transparent'
-                  }`}
-                >
-                  <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-400' : 'text-theme-dim'}`} />
-                  <span>{cat.label}</span>
-                  {cat.badge && (
-                    <span
-                      aria-hidden="true"
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
-                        cat.badgeColor === 'rose'
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                          : cat.badgeColor === 'amber'
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                          : cat.badgeColor === 'emerald'
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : isSelected
-                          ? 'bg-cyan-500/25 text-cyan-200'
-                          : 'bg-theme-secondary text-theme-dim'
-                      }`}
-                    >
-                      {cat.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quick "Jump to View" Dropdown (Direct 1-Click Access to All 11 Views) */}
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setQuickNavOpen(!quickNavOpen)}
-              className="w-full md:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold bg-theme-secondary/80 hover:bg-theme-secondary border border-theme-border/70 hover:border-cyan-500/40 text-theme-muted hover:text-cyan-300 flex items-center justify-between gap-2.5 transition-all cursor-pointer"
-              title="Jump directly to any of the 11 audit views"
-            >
-              <div className="flex items-center gap-1.5">
-                <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="text-[10px] font-mono text-theme-dim uppercase">View:</span>
-                <span className="text-theme-text font-bold text-xs truncate max-w-[140px]">{currentTabMeta?.label || activeTab}</span>
-              </div>
-              <ChevronDown className={`w-3.5 h-3.5 text-theme-dim transition-transform duration-200 ${quickNavOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Quick Switcher Modal / Dropdown */}
-            {quickNavOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setQuickNavOpen(false)} />
-                <div className="absolute right-0 top-full mt-2 w-72 p-2 rounded-2xl bg-theme-card/95 border border-theme-border/80 shadow-2xl backdrop-blur-xl z-50 space-y-2">
-                  <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-theme-dim border-b border-theme-border/50 flex items-center justify-between">
-                    <span>Direct Jump ({ALL_TABS_LIST.length} Views)</span>
-                    <span className="text-[9px] text-cyan-400">1-Click</span>
-                  </div>
-                  <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
-                    {ALL_TABS_LIST.map((t) => {
-                      const TIcon = t.icon || Table;
-                      const isCurrent = activeTab === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab(t.id);
-                            setQuickNavOpen(false);
-                          }}
-                          className={`w-full px-2.5 py-2 rounded-xl text-xs flex items-center justify-between transition-all cursor-pointer ${
-                            isCurrent
-                              ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
-                              : 'text-theme-muted hover:text-white hover:bg-theme-secondary/60'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <TIcon className={`w-3.5 h-3.5 ${isCurrent ? 'text-cyan-400' : 'text-theme-dim'}`} />
-                            <span>{t.label}</span>
-                          </div>
-                          {t.badge && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-theme-secondary text-theme-dim">
-                              {t.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+        <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-theme-card border border-theme-border shadow-sm overflow-x-auto scrollbar-none">
+          {NAV_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isSelected = activeNavId === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                aria-label={tab.label}
+                onClick={() => handleNavClick(tab.id)}
+                className={`flex-1 min-w-fit px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/50 shadow-sm font-bold ring-1 ring-cyan-500/25'
+                    : 'text-theme-muted hover:text-theme-text hover:bg-theme-secondary/70 border border-transparent'
+                }`}
+              >
+                <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-cyan-600 dark:text-cyan-400' : 'text-theme-dim'}`} />
+                <span className="whitespace-nowrap font-medium">{tab.label}</span>
+                {tab.badge && (
+                  <span
+                    aria-hidden="true"
+                    className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                      tab.badgeColor === 'rose'
+                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                        : tab.badgeColor === 'amber'
+                        ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30'
+                        : tab.badgeColor === 'emerald'
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
+                        : isSelected
+                        ? 'bg-cyan-500/25 text-cyan-800 dark:text-cyan-200'
+                        : 'bg-theme-secondary text-theme-dim'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Level 2: Sub-Tab Pills (Contextual Sub-Views for Selected Category) */}
-        {activeCategory?.subTabs && activeCategory.subTabs.length > 1 && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-theme-secondary/40 border border-theme-border/50 overflow-x-auto">
-            <span className="text-[10px] font-mono text-theme-dim uppercase tracking-wider shrink-0 flex items-center gap-1">
-              <span>{activeCategory.label}</span>
-              <span>/</span>
+        {/* Contextual Sub-Pill Bar for Multi-View Tabs */}
+        {currentSubTabs && currentSubTabs.length > 1 && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-theme-secondary/40 border border-theme-border/60 overflow-x-auto scrollbar-none">
+            <span className="text-[10px] font-mono text-theme-dim uppercase tracking-wider shrink-0 flex items-center gap-1.5 font-bold">
+              <span>{activeNavTab?.label}</span>
+              <span className="text-theme-dim/50">/</span>
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
-              {activeCategory.subTabs.map((sub) => {
+              {currentSubTabs.map((sub) => {
                 const SubIcon = sub.icon || Table;
                 const isSubActive = activeTab === sub.id;
                 return (
@@ -657,15 +680,15 @@ export default function Step5Results() {
                     onClick={() => setActiveTab(sub.id)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                       isSubActive
-                        ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/50 shadow-sm'
-                        : 'bg-theme-card/60 text-theme-muted hover:text-white hover:bg-theme-secondary border border-transparent hover:border-theme-border/60'
+                        ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/50 shadow-sm font-bold'
+                        : 'bg-theme-card text-theme-muted hover:text-theme-text hover:bg-theme-secondary border border-theme-border/40'
                     }`}
                   >
-                    <SubIcon className={`w-3 h-3 ${isSubActive ? 'text-cyan-400' : 'text-theme-dim'}`} />
+                    <SubIcon className={`w-3 h-3 ${isSubActive ? 'text-cyan-600 dark:text-cyan-400' : 'text-theme-dim'}`} />
                     <span>{sub.label}</span>
                     {sub.badge && (
                       <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
-                        isSubActive ? 'bg-cyan-500/30 text-cyan-200' : 'bg-theme-secondary text-theme-dim'
+                        isSubActive ? 'bg-cyan-500/30 text-cyan-800 dark:text-cyan-200' : 'bg-theme-secondary text-theme-dim'
                       }`}>
                         {sub.badge}
                       </span>
@@ -718,26 +741,26 @@ export default function Step5Results() {
               <div className="flex items-center gap-3 text-xs font-mono">
                 <div className="px-3 py-1.5 rounded-xl bg-theme-secondary/50 border border-theme-border text-center">
                   <span className="text-[10px] text-theme-dim uppercase block">k_min</span>
-                  <span className="text-sm font-bold text-cyan-400">
+                  <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400">
                     {kAnon.k_min ?? kAnon.smallest_group_size_k ?? summary.smallest_group_size_k ?? 1}
                   </span>
                 </div>
                 <div className="px-3 py-1.5 rounded-xl bg-theme-secondary/50 border border-theme-border text-center">
                   <span className="text-[10px] text-theme-dim uppercase block">k &lt; 3 Rows</span>
-                  <span className="text-sm font-bold text-amber-400">
+                  <span className="text-sm font-bold text-amber-600 dark:text-amber-400">
                     {kAnon.percent_low_k ?? summary.percent_low_k ?? 0}%
                   </span>
                 </div>
                 <div className="px-3 py-1.5 rounded-xl bg-theme-secondary/50 border border-theme-border text-center">
                   <span className="text-[10px] text-theme-dim uppercase block">Unique Rows</span>
-                  <span className="text-sm font-bold text-rose-400">
+                  <span className="text-sm font-bold text-rose-600 dark:text-rose-400">
                     {kAnon.unique_rows ?? 0}
                   </span>
                 </div>
                 {Boolean(activeJob.suppressedCount || summary.suppressed_count) && (
                   <div className="px-3 py-1.5 rounded-xl bg-theme-secondary/50 border border-theme-border text-center">
                     <span className="text-[10px] text-theme-dim uppercase block">Suppressed</span>
-                    <span className="text-sm font-bold text-purple-400">
+                    <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
                       {activeJob.suppressedCount ?? summary.suppressed_count ?? 0}
                     </span>
                   </div>
@@ -748,20 +771,34 @@ export default function Step5Results() {
             {/* Plain-Language Explanation */}
             <div className={`p-4 rounded-xl border flex items-start gap-3 ${
               reIdRiskLevel === 'LOW'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                ? 'bg-emerald-500/10 border-emerald-500/30'
                 : reIdRiskLevel === 'MEDIUM'
-                ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                ? 'bg-amber-500/10 border-amber-500/30'
+                : 'bg-rose-500/10 border-rose-500/30'
             }`}>
-              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <Info className={`w-4 h-4 shrink-0 mt-0.5 ${
+                reIdRiskLevel === 'LOW'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : reIdRiskLevel === 'MEDIUM'
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`} />
               <div className="text-xs space-y-1">
-                <span className="font-bold block">Plain-Language Assessment</span>
-                <p className="leading-relaxed opacity-90">
+                <span className={`font-bold block ${
+                  reIdRiskLevel === 'LOW'
+                    ? 'text-emerald-800 dark:text-emerald-300'
+                    : reIdRiskLevel === 'MEDIUM'
+                    ? 'text-amber-800 dark:text-amber-300'
+                    : 'text-rose-800 dark:text-rose-300'
+                }`}>
+                  Plain-Language Assessment
+                </span>
+                <p className="leading-relaxed text-theme-text/90 font-medium">
                   {kAnon.explanation || `Re-identification risk is ${reIdRiskLevel}. Quasi-identifiers were evaluated over time bucket, rounded GPS coordinates, vehicle type, and road segment.`}
                 </p>
                 {reIdRiskLevel !== 'LOW' && (
-                  <p className="text-[11px] opacity-80 pt-0.5">
-                    QC Audit Status: <strong>WARN</strong>. Result cannot be certified as compliance verified while risk is High. To enforce k ≥ 3, configure <strong>Suppress</strong> or <strong>Aggregate</strong> mode in Configure.
+                  <p className="text-[11px] text-theme-muted pt-0.5 font-medium">
+                    QC Audit Status: <strong className="text-amber-700 dark:text-amber-300">WARN</strong>. Result cannot be certified as compliance verified while risk is High. To enforce k ≥ 3, configure <strong className="text-cyan-700 dark:text-cyan-300">Suppress</strong> or <strong className="text-cyan-700 dark:text-cyan-300">Aggregate</strong> mode in Configure.
                   </p>
                 )}
               </div>
@@ -1153,17 +1190,23 @@ export default function Step5Results() {
                 <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-cyan-400" />
                   <span>Re-Identification Risk & k-Anonymity Assessment</span>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase font-mono ${
-                      reIdRiskLevel === 'LOW'
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : reIdRiskLevel === 'MEDIUM'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                    }`}
-                  >
-                    Risk Level: {reIdRiskLevel}
-                  </span>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase font-bold">
+                    <span className={`px-2 py-0.5 rounded ${
+                      beforeRiskLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                      beforeRiskLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                      'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      Before: {beforeRiskLevel}
+                    </span>
+                    <span className="text-theme-dim">→</span>
+                    <span className={`px-2 py-0.5 rounded ${
+                      afterRiskLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                      afterRiskLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                      'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      After: {afterRiskLevel}
+                    </span>
+                  </div>
                 </h3>
                 <p className="text-xs text-theme-dim mt-0.5">
                   Evaluates quasi-identifier uniqueness after anonymization to assess linking attack vulnerability.

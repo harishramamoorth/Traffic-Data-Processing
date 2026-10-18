@@ -25,6 +25,7 @@ const jobSchema = new mongoose.Schema(
     aggregatedRecords: { type: Array, default: [] },
     complianceStatus: { type: String, default: null },
     complianceExplanation: { type: String, default: null },
+    config: { type: mongoose.Schema.Types.Mixed, default: {} },
     error: { type: String, default: null },
     completedAt: { type: Date, default: null }
   },
@@ -41,12 +42,14 @@ export const JobModel = mongoose.models.Job || mongoose.model('Job', jobSchema);
 export function createJob({
   id,
   originalFilename,
-  fileSize
+  fileSize,
+  config = {}
 }) {
   return {
     id,
     originalFilename,
     fileSize,
+    config,
     status: 'PENDING',
     summary: null,
     inspection: null,

@@ -729,3 +729,97 @@ def test_re_identification_suppress_and_aggregate(test_config):
         assert cell["record_count"] >= 3, f"Cell has record_count < 3: {cell}"
         for key in cell.keys():
             assert key.lower() not in forbidden_cols, f"Forbidden column {key} found in cell: {cell}"
+
+
+def test_risk_reduction_modes_output_changes(test_config):
+    """
+    Proves that the output changes distinctly for each mode (None, Suppress K, Aggregate):
+    - None: Full row count, k_min < 3, 0 suppressed rows, 0 aggregated records, after_risk is HIGH.
+    - Suppress K=3: Output rows reduced (len < none), k_min >= 3, suppressed_count > 0 reported, after_risk is LOW.
+    - Aggregate: Produces hourly road_segment aggregated records with count >= K, no microdata/GPS/plate/timestamp, after_risk is LOW.
+    """
+    import os
+    csv_path = os.path.join(os.path.dirname(__file__), "..", "sample_traffic_data.csv")
+    assert os.path.exists(csv_path), f"sample_traffic_data.csv not found at {csv_path}"
+
+    sample_df = pd.read_csv(csv_path)
+    clean_df, _, _ = clean_dataset(sample_df, config=test_config)
+    pii = detect_pii_columns(clean_df, config=test_config)
+
+    # 1. Mode None
+    none_cfg = dict(test_config)
+    none_cfg["riskReductionMode"] = "none"
+    none_cfg["kThreshold"] = 3
+    none_df, _ = anonymize_dataset(clean_df, pii_fields=pii, config=none_cfg)
+    none_k = none_df.attrs.get("k_anonymity", {})
+    none_suppressed = none_df.attrs.get("suppressed_count", 0)
+    none_agg = none_df.attrs.get("aggregated_records", [])
+
+    # 2. Mode Suppress K=3
+    suppress_cfg = dict(test_config)
+    suppress_cfg["riskReductionMode"] = "suppress"
+    suppress_cfg["kThreshold"] = 3
+    suppress_df, _ = anonymize_dataset(clean_df, pii_fields=pii, config=suppress_cfg)
+    suppress_k = suppress_df.attrs.get("k_anonymity", {})
+    suppress_suppressed = suppress_df.attrs.get("suppressed_count", 0)
+    suppress_agg = suppress_df.attrs.get("aggregated_records", [])
+
+    # 3. Mode Aggregate K=3
+    agg_cfg = dict(test_config)
+    agg_cfg["riskReductionMode"] = "aggregate"
+    agg_cfg["kThreshold"] = 3
+    agg_df, _ = anonymize_dataset(clean_df, pii_fields=pii, config=agg_cfg)
+    agg_k = agg_df.attrs.get("k_anonymity", {})
+    agg_records = agg_df.attrs.get("aggregated_records", [])
+
+    # PROOF 1: Mode 'None' vs Mode 'Suppress'
+    # Row counts change: suppress removes low-k rows
+    assert len(suppress_df) < len(none_df), (
+        f"Expected suppress row count ({len(suppress_df)}) to be less than none ({len(none_df)})"
+    )
+    # Suppressed count changes: 0 in none, > 0 in suppress
+    assert none_suppressed == 0, f"Expected 0 suppressed in none mode, got {none_suppressed}"
+    assert suppress_suppressed > 0, "Expected > 0 suppressed rows in suppress mode"
+    assert len(none_df) - len(suppress_df) == suppress_suppressed
+    # k_min changes: none has k_min < 3, suppress enforces k_min >= 3
+    assert none_k.get("k_min", 0) < 3, f"Expected none mode k_min < 3, got {none_k.get('k_min')}"
+    assert suppress_k.get("k_min", 0) >= 3, f"Expected suppress mode k_min >= 3, got {suppress_k.get('k_min')}"
+    # Risk changes: none after_risk is HIGH, suppress after_risk is LOW
+    assert none_k.get("after_risk") == "HIGH"
+    assert suppress_k.get("after_risk") == "LOW"
+
+    # PROOF 2: Mode 'Aggregate' vs Other Modes
+    # Aggregated records: none and suppress produce 0, aggregate produces > 0
+    assert len(none_agg) == 0, "Mode none should produce 0 aggregated records"
+    assert len(suppress_agg) == 0, "Mode suppress should produce 0 aggregated records"
+    assert len(agg_records) > 0, "Mode aggregate must produce aggregated records"
+    # Structure changes: Aggregate produces hourly road_segment records with count >= 3
+    forbidden_keys = {"plate", "vehicle_plate", "record_id", "id", "latitude", "lat", "longitude", "lon", "timestamp"}
+    for cell in agg_records:
+        assert cell["record_count"] >= 3, f"Cell count < 3 not suppressed: {cell}"
+        assert "road_segment" in cell
+        assert "hour" in cell or "hour_bucket" in cell
+        assert "avg_speed" in cell
+        assert "max_speed" in cell
+        assert "outlier_count" in cell
+        for k in cell:
+            assert k.lower() not in forbidden_keys, f"Found forbidden microdata column {k} in aggregate cell"
+
+    # Risk changes: Aggregate after_risk is LOW (zero microdata released)
+    assert agg_k.get("after_risk") == "LOW"
+    assert agg_k.get("before_risk") == "HIGH"
+
+    # PROOF 3: Pipeline execution reflects the differences end-to-end
+    from main import process_pipeline
+    pipe_none = process_pipeline(filepath=csv_path, config_override=none_cfg)
+    pipe_suppress = process_pipeline(filepath=csv_path, config_override=suppress_cfg)
+    pipe_agg = process_pipeline(filepath=csv_path, config_override=agg_cfg)
+
+    assert pipe_none["summary"]["suppressed_count"] == 0
+    assert pipe_suppress["summary"]["suppressed_count"] > 0
+    assert pipe_none["summary"]["processed_rows"] > pipe_suppress["summary"]["processed_rows"]
+    assert pipe_agg["summary"]["aggregated_cells_count"] > 0
+    assert pipe_none["summary"]["re_identification_risk_after"] == "HIGH"
+    assert pipe_suppress["summary"]["re_identification_risk_after"] == "LOW"
+    assert pipe_agg["summary"]["re_identification_risk_after"] == "LOW"
+

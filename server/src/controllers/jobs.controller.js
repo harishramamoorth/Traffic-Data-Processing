@@ -227,26 +227,25 @@ export const jobsController = {
 
       if (type === 'aggregate') {
         const rawAgg = job.aggregatedRecords || [];
-        // Flatten congestion_distribution for clean CSV export
         const aggRecords = rawAgg.map(r => ({
           road_segment: r.road_segment,
-          hour_bucket: r.hour_bucket,
+          hour: r.hour || r.hour_bucket,
           record_count: r.record_count,
           avg_speed: r.avg_speed,
           max_speed: r.max_speed,
-          congestion_distribution: typeof r.congestion_distribution === 'object' ? JSON.stringify(r.congestion_distribution) : r.congestion_distribution,
           outlier_count: r.outlier_count
         }));
-        const safeFilename = `aggregated-traffic-${id}`;
 
         if (format === 'json') {
           res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.json"`);
+          res.setHeader('Content-Disposition', 'attachment; filename="aggregated.json"');
           return res.send(JSON.stringify(rawAgg, null, 2));
         } else {
-          const csvData = jsonToCsv(aggRecords);
+          const csvData = aggRecords.length > 0
+            ? jsonToCsv(aggRecords)
+            : 'road_segment,hour,record_count,avg_speed,max_speed,outlier_count\r\n';
           res.setHeader('Content-Type', 'text/csv');
-          res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.csv"`);
+          res.setHeader('Content-Disposition', 'attachment; filename="aggregated.csv"');
           return res.send(csvData);
         }
       }

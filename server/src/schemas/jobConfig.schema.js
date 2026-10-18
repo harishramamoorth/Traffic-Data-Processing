@@ -22,12 +22,15 @@ export const jobConfigSchema = z.object({
   kThreshold: z.number().int().min(2).max(10).optional().default(3),
   piiActions: z.record(z.string(), piiActionEnum).optional().default({}),
   missingValueStrategy: z.record(z.string(), z.string()).optional().default({})
-});
+}).passthrough();
 
 export function validateJobConfig(config) {
   const normalized = { ...config };
   if (normalized.risk_reduction_mode && !normalized.riskReductionMode) {
     normalized.riskReductionMode = normalized.risk_reduction_mode;
+  }
+  if (!normalized.riskReductionMode && normalized.suppressLowK) {
+    normalized.riskReductionMode = 'suppress';
   }
   if (normalized.k_threshold && !normalized.kThreshold) {
     normalized.kThreshold = Number(normalized.k_threshold);

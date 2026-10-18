@@ -340,19 +340,18 @@ def compute_k_anonymity(
             seg_val = grp_keys[0] if isinstance(grp_keys, tuple) else grp_keys
             hr_val = grp_keys[1] if isinstance(grp_keys, tuple) else "All_Hours"
 
-            speed_numeric = pd.to_numeric(grp.get("speed_mph", pd.Series([])), errors="coerce")
+            speed_numeric = pd.to_numeric(grp.get("speed_mph", pd.Series(dtype=float)), errors="coerce")
             avg_speed = round(float(speed_numeric.mean()), 1) if not speed_numeric.empty and speed_numeric.notna().any() else 0.0
             max_speed = round(float(speed_numeric.max()), 1) if not speed_numeric.empty and speed_numeric.notna().any() else 0.0
-            outlier_cnt = int((grp.get("speed_outlier_flag", pd.Series([False])) == True).sum())
-            congestion_dist = {str(k): int(v) for k, v in grp["congestion_level"].value_counts().items()} if "congestion_level" in grp else {}
+            outlier_cnt = int((grp.get("speed_outlier_flag", pd.Series(dtype=bool)) == True).sum()) if "speed_outlier_flag" in grp.columns else 0
 
             aggregated_records.append({
                 "road_segment": str(seg_val),
+                "hour": str(hr_val),
                 "hour_bucket": str(hr_val),
                 "record_count": int(cell_count),
                 "avg_speed": avg_speed,
                 "max_speed": max_speed,
-                "congestion_distribution": congestion_dist,
                 "outlier_count": outlier_cnt
             })
 
@@ -368,6 +367,12 @@ def compute_k_anonymity(
         final_metrics["risk_level"] = "LOW"
         final_metrics["risk_badge"] = "LOW"
         final_metrics["explanation"] = f"K-Anonymity Guard enforced (K={k_threshold}): k_min is {final_metrics['k_min']} (all groups >= {k_threshold}). {len(suppressed_rows)} rows suppressed."
+    elif risk_reduction_mode == "aggregate":
+        final_metrics["k_min"] = k_threshold
+        final_metrics["percent_low_k"] = 0.0
+        final_metrics["risk_level"] = "LOW"
+        final_metrics["risk_badge"] = "LOW"
+        final_metrics["explanation"] = f"Aggregate mode enforced (K={k_threshold}): zero microdata released. All published cells have count >= {k_threshold} (suppressed {suppressed_cells_count} small cell(s))."
 
     report = {
         "k_min": final_metrics["k_min"],
@@ -378,6 +383,14 @@ def compute_k_anonymity(
         "low_k_row_count": final_metrics["low_k_row_count"],
         "risk_level": final_metrics["risk_level"],
         "risk_badge": final_metrics["risk_badge"],
+        "before_risk": base_metrics.get("risk_level", "LOW"),
+        "after_risk": final_metrics["risk_level"],
+        "before_percent_low_k": base_metrics.get("percent_low_k", 0.0),
+        "after_percent_low_k": final_metrics["percent_low_k"],
+        "before_k_min": base_metrics.get("k_min", 0),
+        "after_k_min": final_metrics["k_min"],
+        "before_metrics": base_metrics,
+        "after_metrics": final_metrics,
         "group_size_distribution": final_metrics["group_size_distribution"],
         "distribution": final_metrics["group_size_distribution"],
         "explanation": final_metrics["explanation"],
@@ -388,8 +401,7 @@ def compute_k_anonymity(
         "suppressed_count": len(suppressed_rows),
         "suppressed_applied": len(suppressed_rows) > 0,
         "aggregated_cells_count": len(aggregated_records),
-        "suppressed_cells_count": suppressed_cells_count,
-        "before_metrics": base_metrics
+        "suppressed_cells_count": suppressed_cells_count
     }
 
     return work_df, report, suppressed_rows, aggregated_records, logs

@@ -269,6 +269,8 @@ def process_pipeline(
             "compliance_status": compliance_status,
             "compliance_explanation": compliance_explanation,
             "re_identification_risk": risk_lvl,
+            "re_identification_risk_before": k_anonymity_data.get("before_risk", k_anonymity_data.get("before_metrics", {}).get("risk_level", "LOW")),
+            "re_identification_risk_after": k_anonymity_data.get("after_risk", risk_lvl),
             "privacy_claim": honest_privacy_claim,
             "smallest_group_size_k": k_anonymity_data.get("smallest_group_size_k", 1),
             "percent_low_k": k_anonymity_data.get("percent_low_k", 0.0)
@@ -342,9 +344,15 @@ def main():
         )
 
         if args.output:
-            os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+            out_dir = os.path.dirname(os.path.abspath(args.output))
+            os.makedirs(out_dir, exist_ok=True)
             with open(args.output, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, default=json_default)
+            if results.get("aggregated_records"):
+                agg_df = pd.DataFrame(results["aggregated_records"])
+                cols_to_keep = [c for c in ["road_segment", "hour", "record_count", "avg_speed", "max_speed", "outlier_count"] if c in agg_df.columns]
+                if cols_to_keep:
+                    agg_df[cols_to_keep].to_csv(os.path.join(out_dir, "aggregated.csv"), index=False)
 
         print(json.dumps(results, indent=2, default=json_default))
         sys.exit(0)

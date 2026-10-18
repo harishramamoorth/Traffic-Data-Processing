@@ -89,7 +89,8 @@ export const uploadController = {
     const newJob = createJob({
       id: jobId,
       originalFilename: req.file ? req.file.originalname : 'sample_traffic_data.csv',
-      fileSize: req.file ? req.file.size : 1200
+      fileSize: req.file ? req.file.size : 1200,
+      config: dynamicConfig || {}
     });
 
     try {

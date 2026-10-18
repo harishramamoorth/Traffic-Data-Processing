@@ -41,6 +41,13 @@ router.get(
 // GET /api/jobs/:id/download?format=csv|json
 router.get('/:id/download', validateParams(idParamSchema), jobsController.downloadRecords);
 
+// GET /api/jobs/:id/aggregated.csv (direct download route)
+router.get('/:id/aggregated.csv', validateParams(idParamSchema), (req, res, next) => {
+  req.query.type = 'aggregate';
+  req.query.format = 'csv';
+  return jobsController.downloadRecords(req, res, next);
+});
+
 // GET /api/jobs/:id/report?format=markdown|json
 router.get('/:id/report', validateParams(idParamSchema), jobsController.getJobReport);
 

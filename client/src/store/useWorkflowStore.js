@@ -229,8 +229,12 @@ export const useWorkflowStore = create((set, get) => ({
   setIsProfiling: (val) => set({ isProfiling: val }),
 
   updateConfig: (updates) => {
+    const nextUpdates = { ...updates };
+    if ('riskReductionMode' in nextUpdates) {
+      nextUpdates.suppressLowK = nextUpdates.riskReductionMode === 'suppress';
+    }
     set((state) => ({
-      customConfig: { ...state.customConfig, ...updates },
+      customConfig: { ...state.customConfig, ...nextUpdates },
       activePreset: 'custom'
     }));
   },
