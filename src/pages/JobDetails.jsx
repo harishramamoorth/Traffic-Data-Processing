@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ChevronLeft, Database, AlertCircle } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import Step5Results from '../components/wizard/Step5Results';
+import PageLoader from '../components/PageLoader';
 import axios from 'axios';
 
 export default function JobDetails() {
@@ -32,9 +33,18 @@ export default function JobDetails() {
 
   if (loading) {
     return (
-      <div className="space-y-4 py-12 max-w-5xl mx-auto">
-        <div className="h-14 rounded-2xl bg-theme-card/60 border border-theme-border animate-pulse" />
-        <div className="h-96 rounded-2xl bg-theme-card/60 border border-theme-border animate-pulse" />
+      <div className="py-12 max-w-4xl mx-auto">
+        <PageLoader
+          variant="card"
+          title="Loading Job Verification Details"
+          subtitle={`Retrieving cryptographic audit trail and quality battery for job ${id}...`}
+          steps={[
+            'Fetching job metadata from MongoDB collection...',
+            'Reconciling row accounting and quality battery...',
+            'Auditing HMAC pseudonymization and GPS boundaries...',
+            'Preparing interactive compliance dashboard...'
+          ]}
+        />
       </div>
     );
   }

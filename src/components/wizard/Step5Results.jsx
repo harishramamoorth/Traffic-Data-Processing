@@ -46,6 +46,7 @@ import {
 } from 'recharts';
 import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { useToast } from '../Toast';
+import PageLoader from '../PageLoader';
 import axios from 'axios';
 
 export default function Step5Results() {
@@ -1661,7 +1662,7 @@ export default function Step5Results() {
 
           <div className="overflow-x-auto">
             {recordsLoading ? (
-              <div className="text-center py-10 text-xs text-theme-muted">Loading records...</div>
+              <PageLoader variant="minimal" title="Fetching paginated sanitized records..." />
             ) : records.length === 0 ? (
               <div className="text-center py-10 text-xs text-theme-dim">No records stored for this job.</div>
             ) : (

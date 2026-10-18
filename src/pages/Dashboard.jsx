@@ -34,6 +34,7 @@ import Step3Configure from '../components/wizard/Step3Configure';
 import Step4Processing from '../components/wizard/Step4Processing';
 import Step5Results from '../components/wizard/Step5Results';
 import PrivacyGateway3D from '../components/3d/PrivacyGateway3D';
+import PageLoader from '../components/PageLoader';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
@@ -333,7 +334,7 @@ export default function Dashboard() {
         </div>
 
         {loadingJobs ? (
-          <div className="text-center py-8 text-xs text-theme-dim">Loading jobs repository...</div>
+          <PageLoader variant="minimal" title="Synchronizing jobs repository..." />
         ) : recentJobs.length === 0 ? (
           <div className="text-center py-10 space-y-2">
             <p className="text-xs text-theme-muted">No processing jobs recorded yet.</p>
