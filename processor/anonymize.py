@@ -344,7 +344,7 @@ def compute_k_anonymity(
             avg_speed = round(float(speed_numeric.mean()), 1) if not speed_numeric.empty and speed_numeric.notna().any() else 0.0
             max_speed = round(float(speed_numeric.max()), 1) if not speed_numeric.empty and speed_numeric.notna().any() else 0.0
             outlier_cnt = int((grp.get("speed_outlier_flag", pd.Series([False])) == True).sum())
-            congestion_dist = dict(grp["congestion_level"].value_counts()) if "congestion_level" in grp else {}
+            congestion_dist = {str(k): int(v) for k, v in grp["congestion_level"].value_counts().items()} if "congestion_level" in grp else {}
 
             aggregated_records.append({
                 "road_segment": str(seg_val),

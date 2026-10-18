@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, List
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -21,6 +22,19 @@ from clean import clean_dataset
 from anonymize import anonymize_dataset
 from quality_checks import run_quality_checks
 from profile_data import profile_dataset
+
+
+def json_default(obj):
+    """Serialize numpy and pandas types cleanly to native JSON types."""
+    if isinstance(obj, (np.integer, int)):
+        return int(obj)
+    if isinstance(obj, (np.floating, float)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat()
+    return str(obj)
 
 
 def load_config(config_path: str | None = None, config_json: str | None = None) -> Dict[str, Any]:
@@ -330,9 +344,9 @@ def main():
         if args.output:
             os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
             with open(args.output, "w", encoding="utf-8") as f:
-                json.dump(results, f, indent=2)
+                json.dump(results, f, indent=2, default=json_default)
 
-        print(json.dumps(results, indent=2))
+        print(json.dumps(results, indent=2, default=json_default))
         sys.exit(0)
 
     except Exception as e:
@@ -340,7 +354,7 @@ def main():
             "status": "ERROR",
             "error": str(e)
         }
-        print(json.dumps(error_payload, indent=2), file=sys.stderr)
+        print(json.dumps(error_payload, indent=2, default=json_default), file=sys.stderr)
         sys.exit(1)
 
 
