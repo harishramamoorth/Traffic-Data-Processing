@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# File Uploads and Processed outputs
+uploads/
+processed/
+temp/
+output/
+*.log
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+*.local
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Test reports & caches
+.pytest_cache/
+playwright-report/
+test-results/
+

@@ -1,0 +1,179 @@
+# 🚦 Traffic Data Processor — Privacy-Preserving Mobility Platform
+
+An enterprise-grade, interview-winning data privacy and traffic telemetry platform (React 18 + Vite, Tailwind CSS, Three.js, Node.js/Express, Python 3.12+, and MongoDB). Built to ingest raw connected vehicle sensor feeds, detect Personally Identifiable Information (PII), enforce strict Data Minimization and HMAC-SHA256 pseudonymization, generalize temporal/spatial coordinates, flag physical outliers, and conduct automated quality reconciliations with **zero raw data retention**.
+
+---
+
+## 🌟 Highlights & Enterprise Features
+
+- **5-Step Guided Wizard**:
+  1. **Upload**: Drag-and-drop zone with animated glowing border, file validation (CSV/JSON up to 50MB), progress ring, and one-click built-in sample dataset.
+  2. **File Analysis (Pre-Flight Profiling)**: Pre-processing analysis executed entirely in volatile memory via `POST /api/jobs/profile`. Provides animated count-up KPI cards, 0–100 Data Health Score gauge, 7x24 hour-of-day heatmap matrix, speed histogram, coordinate scatter, null rate bars, and sparkline distribution columns.
+  3. **Configure (Privacy & Rules Engine)**: Live trade-off scoring comparing **Privacy Score vs. Data Utility Score** in real-time. Features 3 production presets (*Maximum Privacy*, *Balanced (Recommended)*, *Max Utility*), GPS precision slider (0–4 decimals), 15-minute floor bucketing, outlier handling options, and an in-memory 5-row live transformation preview.
+  4. **Processing (Live Pipeline)**: Interactive 3D particle data stream in sync with real-time pipeline milestones (Load &rarr; Detect PII &rarr; Clean &rarr; Anonymize &rarr; Quality Audits &rarr; Export). Real-time Server-Sent Events (SSE) log stream terminal.
+  5. **Results & Verification**: Interactive Recharts telemetry (QC pass/warn/fail donut, privacy actions, null % before vs. after, speed histogram, road segments), draggable split Before/After comparison with "Session Only — Never Stored" guarantee, and multi-format exports (CSV, JSON, Audit Markdown report, JSON config).
+- **3D Interactive Privacy Gateway**: Custom Three.js WebGL data particle stream where raw telemetry passes through a glowing privacy shield gateway and transitions into sanitized anonymized particles. Includes subtle mouse parallax and automated fallbacks for low-power, mobile, and `prefers-reduced-motion` devices.
+- **Multi-Theme Engine**: 5 switchable themes persisted in `localStorage`:
+  1. *Midnight* (default dark navy + cyan accent)
+  2. *Aurora* (dark + purple/pink gradient)
+  3. *Matrix* (black + terminal green)
+  4. *Light Pro* (clean corporate white + royal blue)
+  5. *High Contrast* (pure black + yellow accessibility standard)
+- **Zero Raw Data Retention**: Raw files deleted immediately in controller `finally` blocks; zero un-anonymized records persisted in MongoDB.
+
+---
+
+## 🏛️ System Architecture
+
+```mermaid
+flowchart TD
+    User([Traffic Data Operator]) -->|Uploads CSV / JSON| Client[React 18 + Vite + Tailwind\n:5173]
+    Client -->|POST /api/jobs/profile| Profiler[In-Memory Profiler\nZero Disk Retention]
+    Profiler -->|Returns Stats & Heatmap| Client
+    Client -->|POST /api/jobs/upload\nwith Config JSON| Server[Node.js + Express API\n:5000]
+
+    subgraph Server-Sent Events & Engine
+        Server -->|GET /api/jobs/:id/stream| SSE[jobStreamService\nLive Progress & Logs]
+        Server -->|Spawn with HASH_SECRET| PyRunner[services/pythonRunner.js]
+        PyRunner --> Main[processor/main.py]
+        Main --> Inspect[inspect_data.py]
+        Main --> Detect[detect_pii.py]
+        Main --> Clean[clean.py]
+        Main --> Anon[anonymize.py]
+        Main --> QC[quality_checks.py (QC-01 to QC-08)]
+    end
+
+    subgraph Zero-Retention Storage
+        QC -->|Anonymized Records Only| MongoRecords[(MongoDB 'records' Collection)]
+        QC -->|Audit Metadata & Telemetry| MongoJobs[(MongoDB 'jobs' Collection)]
+        Server -.->|finally block: unlinkSync| Cleanup[(Delete Staged Temp File)]
+    end
+
+    SSE -.->|Live Stage Events| Client
+    Server -->|Memory-Only Before vs After Sample| Client
+```
+
+---
+
+## 🔒 Privacy Safeguards & Engineering Rules
+
+1. **Zero Raw Retention**: Raw data is never persisted in MongoDB or stored on disk. Staging temp files are unlinked in a `finally` block immediately after processing.
+2. **Volatile Before/After Comparison**: The side-by-side comparison of original vs. anonymized values exists solely in volatile memory during the active upload session. After page refresh, only anonymized records remain.
+3. **HMAC-SHA256 Vehicle Plate Pseudonymization**: Plates are transformed deterministically using a secret key (`process.env.HASH_SECRET`) into `ANON_<first 12 hex chars>`, defending against rainbow tables while preserving trip trajectory continuity.
+4. **Data Minimization (GDPR Art. 5c)**: Direct personal identifiers (`driver_name`, `driver_ssn`, `phone`, `email`) are completely dropped from the dataset schema.
+5. **Spatial & Temporal Generalization**: GPS coordinates are rounded to 2 decimal places ($\approx 1.1\text{ km}$ spatial bounding box), and timestamps are rounded down to 15-minute floor intervals in UTC ISO-8601.
+6. **Non-Clamping Outlier Flagging**: High speeds are not altered or clamped. The pipeline sets `speed_outlier_flag = true`, preserving dataset veracity. Impossible speeds ($<0$ or $>250\text{ mph}$) are nullified with the flag set.
+7. **Free-Text Redaction**: Unstructured text fields are scanned with automated regexes, scrubbing incidental phone numbers, plates, and SSNs.
+
+---
+
+## ⚡ Automated Quality Audit Battery (QC-01 to QC-08)
+
+| Check ID | Verification Assertion | Pass Condition |
+| :--- | :--- | :--- |
+| **QC-01** | Record Count Reconciliation | $\text{Input Rows} = \text{Output Rows} + \text{Rejected Rows}$ (zero silent row loss) |
+| **QC-02** | Schema Completeness | All non-PII dimensions preserved; direct PII minimized |
+| **QC-03** | Zero Raw PII Leakage | Independent re-scan confirms 0 raw SSNs, emails, or phone numbers in output |
+| **QC-04** | Physical Value Ranges | Verified velocity bounds ($[0, 250]$ mph); impossible values nullified |
+| **QC-05** | Generalization Audit | Confirmed GPS coordinates $\le 2$ decimal places; timestamps floored to 15 min |
+| **QC-06** | Plate Pseudonym Consistency | Same plate yields identical `ANON_` hash; standard format verified |
+| **QC-07** | Duplicate Absence Check | Zero duplicate rows detected in cleaned output dataset |
+| **QC-08** | Column Null Rate Thresholds | Analytical column missingness complies with healthy data quality limits |
+
+---
+
+## 🛠️ Environment Variables Configuration
+
+Create a `.env` file in `server/`:
+
+```env
+PORT=5000
+NODE_ENV=development
+CLIENT_ORIGIN=http://localhost:5173
+
+# Cryptographic Pseudonymization Secret (Keep Private!)
+HASH_SECRET=your_super_secret_hmac_key_min_32_characters_here
+
+# Python Runtime Executable
+PYTHON_PATH=python
+
+# Storage Directories
+UPLOAD_DIR=./uploads
+PROCESSED_DIR=./processed
+
+# MongoDB Connection
+MONGODB_URI=mongodb://localhost:27017/traffic_processor
+```
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Prerequisites
+- Node.js v18+ & npm
+- Python 3.10+ with pip
+- MongoDB running locally on port `27017`
+
+### 2. Install Dependencies
+```powershell
+# Python Processor
+cd processor
+python -m pip install -r requirements.txt
+
+# Express Backend
+cd ../server
+npm install
+
+# React Frontend
+cd ../client
+npm install
+```
+
+### 3. Run Test Suites
+```powershell
+# Run Python Pipeline Tests (8/8)
+pytest processor/tests
+
+# Run React Store & Component Tests
+cd client
+npm test
+```
+
+### 4. Build Client Bundle
+```powershell
+cd client
+npm run build
+```
+
+### 5. Launch the Application
+```powershell
+# Windows 1-Click Launch:
+.\start.bat
+
+# Or run services separately:
+# Terminal 1 (Backend):
+cd server && npm run dev
+
+# Terminal 2 (Frontend):
+cd client && npm run dev
+```
+
+Visit the dashboard at `http://localhost:5173`.
+
+---
+
+## 📡 API Endpoints Reference
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/jobs/profile` | In-memory pre-processing file analysis (nulls, types, PII, outliers, health score) |
+| `POST` | `/api/jobs/upload` | Multipart file upload with dynamic config JSON, runs pipeline, deletes temp file in `finally` |
+| `GET` | `/api/jobs/:id/stream` | Server-Sent Events (SSE) live progress and execution log streaming |
+| `GET` | `/api/jobs/:id/analytics` | Pre-aggregated Recharts analytics payload (QC donut, speed histogram, null bars) |
+| `GET` | `/api/jobs` | Paginated jobs directory with `page`, `limit`, `search`, and `status` filters |
+| `GET` | `/api/jobs/:id` | Detailed job audit telemetry (metadata, PII report, QC checks, rejection log) |
+| `GET` | `/api/jobs/:id/records` | Paginated anonymized records with `page`, `limit`, `sort`, `order`, `filter` |
+| `GET` | `/api/jobs/:id/download` | Downloads cleaned dataset (`?format=csv` or `?format=json`) |
+| `GET` | `/api/jobs/:id/report` | Downloadable compliance audit report (`?format=markdown` or `json`) |
+| `DELETE` | `/api/jobs/:id` | Deletes job metadata and associated anonymized records from MongoDB |
+| `GET` | `/api/health` | Health status and runtime telemetry |

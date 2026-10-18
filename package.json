@@ -1,0 +1,10 @@
+{
+  "name": "traffic-data-processor",
+  "private": true,
+  "scripts": {
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "test:processor": "python processor/main.py --input processor/sample_traffic_data.csv",
+    "test:python": "pytest processor/tests"
+  }
+}
