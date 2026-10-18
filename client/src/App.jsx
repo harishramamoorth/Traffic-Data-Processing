@@ -18,6 +18,8 @@ import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import ThemeSelector from './components/ThemeSelector';
 import { ToastProvider } from './components/Toast';
+import PageLoadingBar from './components/PageLoadingBar';
+import PageLoader from './components/PageLoader';
 
 export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -25,6 +27,7 @@ export default function App() {
   return (
     <ToastProvider>
       <BrowserRouter>
+        <PageLoadingBar />
         <div className="min-h-screen flex flex-col bg-theme-bg text-theme-text transition-colors duration-300">
           {/* Top Navigation Bar */}
           <header className="sticky top-0 z-50 backdrop-blur-xl bg-theme-bg/85 border-b border-theme-border">

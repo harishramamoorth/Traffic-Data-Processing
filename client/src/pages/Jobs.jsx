@@ -16,6 +16,7 @@ import {
   X
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import PageLoader from '../components/PageLoader';
 import axios from 'axios';
 
 export default function Jobs() {
@@ -191,7 +192,16 @@ export default function Jobs() {
       {/* Jobs Table */}
       <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
         {loading ? (
-          <div className="text-center py-12 text-xs text-theme-dim">Loading jobs...</div>
+          <PageLoader
+            variant="card"
+            title="Querying Jobs Repository"
+            subtitle="Retrieving historical pipeline executions from MongoDB..."
+            steps={[
+              'Connecting to jobs collection...',
+              'Loading privacy profiles and runtime metrics...',
+              'Formatting audit records...'
+            ]}
+          />
         ) : jobs.length === 0 ? (
           <div className="text-center py-14 space-y-3">
             <p className="text-xs text-theme-muted">No jobs matching your filter criteria.</p>
