@@ -22,6 +22,9 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  LayoutGrid,
+  Check,
   Clock,
   Gauge,
   MapPin,
@@ -59,6 +62,7 @@ export default function Step5Results() {
   const [activeTab, setActiveTab] = useState('overview');
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [quickNavOpen, setQuickNavOpen] = useState(false);
   const tabsContainerRef = React.useRef(null);
 
   // Split Divider State for Before/After
@@ -264,19 +268,96 @@ export default function Step5Results() {
     return [];
   }, [nullReport, analytics, summary.processed_rows]);
 
-  const TABS = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'downloads', label: 'Downloads' },
-    { id: 'k_anonymity', label: `Re-ID Risk (${reIdRiskLevel})` },
-    { id: 'data_quality', label: `Data Quality & Nulls (${nullEntries.length})` },
-    { id: 'charts', label: 'Analytics Charts' },
-    { id: 'before_after', label: 'Before vs After (Session Only)' },
-    { id: 'pii_report', label: `PII Report (${piiReport.length})` },
-    { id: 'quality_checks', label: `Quality Checks (${qualityChecks.length})` },
-    { id: 'rejected_rows', label: `Rejected Rows (${rejectedRows.length})` },
-    { id: 'records', label: 'Sanitized Records' },
-    { id: 'audit_log', label: 'Audit Log' }
-  ];
+  const passedChecksCount = qualityChecks.filter((q) => q.status === 'PASS').length;
+  const qcBadgeText = summary.quality_checks_passed || `${passedChecksCount}/${qualityChecks.length || 10}`;
+
+  // Grouped Categories for High-Efficiency Navigation
+  const CATEGORIES = useMemo(() => [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: Award,
+      badge: isAllPassed ? 'Passed' : isWarn ? 'Warnings' : 'Fail',
+      badgeColor: isAllPassed ? 'emerald' : isWarn ? 'amber' : 'rose',
+      defaultTab: 'overview',
+      tabs: ['overview']
+    },
+    {
+      id: 'privacy',
+      label: 'Privacy & Re-ID',
+      icon: Shield,
+      badge: reIdRiskLevel,
+      badgeColor: reIdRiskLevel === 'LOW' ? 'emerald' : reIdRiskLevel === 'MEDIUM' ? 'amber' : 'rose',
+      defaultTab: 'k_anonymity',
+      tabs: ['k_anonymity', 'pii_report'],
+      subTabs: [
+        { id: 'k_anonymity', label: 'Re-ID Risk Assessment', badge: reIdRiskLevel, icon: Shield },
+        { id: 'pii_report', label: 'PII Transformations', badge: `${piiReport.length} Fields`, icon: ShieldCheck }
+      ]
+    },
+    {
+      id: 'quality',
+      label: 'Quality & Audit',
+      icon: CheckCircle2,
+      badge: qcBadgeText,
+      badgeColor: isFail ? 'rose' : isWarn ? 'amber' : 'emerald',
+      defaultTab: 'quality_checks',
+      tabs: ['quality_checks', 'data_quality', 'rejected_rows', 'audit_log'],
+      subTabs: [
+        { id: 'quality_checks', label: 'Quality Battery', badge: qcBadgeText, icon: CheckCircle2 },
+        { id: 'data_quality', label: 'Null Values Audit', badge: `${nullEntries.length} Cols`, icon: Table },
+        { id: 'rejected_rows', label: 'Rejected Rows', badge: `${rejectedRows.length} Rows`, icon: AlertTriangle },
+        { id: 'audit_log', label: 'Execution Log', badge: `${processingLogs.length} Lines`, icon: Terminal }
+      ]
+    },
+    {
+      id: 'data',
+      label: 'Data Explorer',
+      icon: BarChart3,
+      badge: `${summary.processed_rows || 0} Rows`,
+      badgeColor: 'cyan',
+      defaultTab: 'charts',
+      tabs: ['charts', 'records', 'before_after'],
+      subTabs: [
+        { id: 'charts', label: 'Analytics Charts', icon: BarChart3 },
+        { id: 'records', label: 'Sanitized Records', badge: `${summary.processed_rows || 0} Rows`, icon: Table },
+        { id: 'before_after', label: 'Before vs After Diff', icon: Columns }
+      ]
+    },
+    {
+      id: 'downloads',
+      label: 'Downloads',
+      icon: Download,
+      badge: hasAggregated ? 'Dual CSV' : 'Clean CSV',
+      badgeColor: 'cyan',
+      defaultTab: 'downloads',
+      tabs: ['downloads']
+    }
+  ], [isAllPassed, isWarn, isFail, reIdRiskLevel, qcBadgeText, qualityChecks.length, piiReport.length, nullEntries.length, rejectedRows.length, processingLogs.length, summary.processed_rows, hasAggregated]);
+
+  const activeCategory = useMemo(() => {
+    return CATEGORIES.find((c) => c.tabs.includes(activeTab)) || CATEGORIES[0];
+  }, [CATEGORIES, activeTab]);
+
+  const ALL_TABS_LIST = useMemo(() => [
+    { id: 'overview', label: 'Overview', icon: Award, group: 'Executive Summary' },
+    { id: 'k_anonymity', label: 'Re-ID Risk Assessment', badge: reIdRiskLevel, icon: Shield, group: 'Privacy & Re-ID' },
+    { id: 'pii_report', label: 'PII Transformations', badge: `${piiReport.length} Fields`, icon: ShieldCheck, group: 'Privacy & Re-ID' },
+    { id: 'quality_checks', label: 'Quality Verification Battery', badge: qcBadgeText, icon: CheckCircle2, group: 'Quality & Audit' },
+    { id: 'data_quality', label: 'Null Values & Schema Audit', badge: `${nullEntries.length} Cols`, icon: Table, group: 'Quality & Audit' },
+    { id: 'rejected_rows', label: 'Rejected Rows (Audit)', badge: `${rejectedRows.length} Rows`, icon: AlertTriangle, group: 'Quality & Audit' },
+    { id: 'audit_log', label: 'Processing Execution Log', badge: `${processingLogs.length} Lines`, icon: Terminal, group: 'Quality & Audit' },
+    { id: 'charts', label: 'Analytics Charts & Histograms', icon: BarChart3, group: 'Data Explorer' },
+    { id: 'records', label: 'Sanitized Records Table', badge: `${summary.processed_rows || 0} Rows`, icon: Table, group: 'Data Explorer' },
+    { id: 'before_after', label: 'Before vs After Diff Comparison', icon: Columns, group: 'Data Explorer' },
+    { id: 'downloads', label: 'Downloads & Export Hub', badge: 'CSV / JSON / Report', icon: Download, group: 'Exports' }
+  ], [reIdRiskLevel, piiReport.length, qcBadgeText, nullEntries.length, rejectedRows.length, processingLogs.length, summary.processed_rows]);
+
+  const currentTabMeta = useMemo(() => {
+    return ALL_TABS_LIST.find((t) => t.id === activeTab);
+  }, [ALL_TABS_LIST, activeTab]);
+
+  const TABS = ALL_TABS_LIST;
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 pb-24">
@@ -444,57 +525,157 @@ export default function Step5Results() {
         </div>
       </div>
 
-      {/* Navigation Tabs Bar with Scroll Controls */}
-      <div className="relative flex items-center border-b border-theme-border/60 pb-2">
-        <button
-          type="button"
-          onClick={() => {
-            if (tabsContainerRef.current) tabsContainerRef.current.scrollBy({ left: -200, behavior: 'smooth' });
-          }}
-          className="p-1.5 rounded-lg bg-theme-secondary/80 border border-theme-border text-theme-muted hover:text-white shrink-0 mr-1.5 transition-colors cursor-pointer"
-          title="Scroll tabs left"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
+      {/* High-Efficiency Tab Navigation System */}
+      <div className="space-y-2.5">
+        {/* Level 1: Primary Category Hubs + Quick View Switcher */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5 p-2 rounded-2xl bg-theme-card/90 border border-theme-border/80 shadow-md backdrop-blur-md">
+          {/* Main Category Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5 flex-1">
+            {CATEGORIES.map((cat) => {
+              const Icon = cat.icon;
+              const isSelected = activeCategory?.id === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  aria-label={cat.label}
+                  onClick={() => {
+                    if (cat.tabs.includes(activeTab)) {
+                      // Already in category, do nothing
+                    } else {
+                      setActiveTab(cat.defaultTab);
+                    }
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm shadow-cyan-500/10 ring-1 ring-cyan-500/30'
+                      : 'text-theme-muted hover:text-theme-text hover:bg-theme-secondary/60 border border-transparent'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-400' : 'text-theme-dim'}`} />
+                  <span>{cat.label}</span>
+                  {cat.badge && (
+                    <span
+                      aria-hidden="true"
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                        cat.badgeColor === 'rose'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : cat.badgeColor === 'amber'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          : cat.badgeColor === 'emerald'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : isSelected
+                          ? 'bg-cyan-500/25 text-cyan-200'
+                          : 'bg-theme-secondary text-theme-dim'
+                      }`}
+                    >
+                      {cat.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-        <div
-          ref={tabsContainerRef}
-          className="flex items-center gap-1.5 overflow-x-auto scrollbar-none scroll-smooth flex-1"
-        >
-          {TABS.map((tab) => (
+          {/* Quick "Jump to View" Dropdown (Direct 1-Click Access to All 11 Views) */}
+          <div className="relative shrink-0">
             <button
-              key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-sm'
-                  : tab.id === 'downloads'
-                  ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-300 border border-cyan-500/40 hover:border-cyan-300'
-                  : 'text-theme-muted hover:text-theme-text hover:bg-theme-secondary/40'
-              }`}
+              onClick={() => setQuickNavOpen(!quickNavOpen)}
+              className="w-full md:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold bg-theme-secondary/80 hover:bg-theme-secondary border border-theme-border/70 hover:border-cyan-500/40 text-theme-muted hover:text-cyan-300 flex items-center justify-between gap-2.5 transition-all cursor-pointer"
+              title="Jump directly to any of the 11 audit views"
             >
-              {tab.id === 'downloads' && <Download className="w-3.5 h-3.5 text-cyan-400" />}
-              <span>{tab.label}</span>
-              {tab.id === 'downloads' && (
-                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 font-bold uppercase" aria-hidden="true">
-                  CSV / JSON
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-[10px] font-mono text-theme-dim uppercase">View:</span>
+                <span className="text-theme-text font-bold text-xs truncate max-w-[140px]">{currentTabMeta?.label || activeTab}</span>
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-theme-dim transition-transform duration-200 ${quickNavOpen ? 'rotate-180' : ''}`} />
             </button>
-          ))}
+
+            {/* Quick Switcher Modal / Dropdown */}
+            {quickNavOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setQuickNavOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 w-72 p-2 rounded-2xl bg-theme-card/95 border border-theme-border/80 shadow-2xl backdrop-blur-xl z-50 space-y-2">
+                  <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-theme-dim border-b border-theme-border/50 flex items-center justify-between">
+                    <span>Direct Jump ({ALL_TABS_LIST.length} Views)</span>
+                    <span className="text-[9px] text-cyan-400">1-Click</span>
+                  </div>
+                  <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
+                    {ALL_TABS_LIST.map((t) => {
+                      const TIcon = t.icon || Table;
+                      const isCurrent = activeTab === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(t.id);
+                            setQuickNavOpen(false);
+                          }}
+                          className={`w-full px-2.5 py-2 rounded-xl text-xs flex items-center justify-between transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
+                              : 'text-theme-muted hover:text-white hover:bg-theme-secondary/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <TIcon className={`w-3.5 h-3.5 ${isCurrent ? 'text-cyan-400' : 'text-theme-dim'}`} />
+                            <span>{t.label}</span>
+                          </div>
+                          {t.badge && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-theme-secondary text-theme-dim">
+                              {t.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (tabsContainerRef.current) tabsContainerRef.current.scrollBy({ left: 200, behavior: 'smooth' });
-          }}
-          className="p-1.5 rounded-lg bg-theme-secondary/80 border border-theme-border text-theme-muted hover:text-white shrink-0 ml-1.5 transition-colors cursor-pointer"
-          title="Scroll tabs right"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
+        {/* Level 2: Sub-Tab Pills (Contextual Sub-Views for Selected Category) */}
+        {activeCategory?.subTabs && activeCategory.subTabs.length > 1 && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-theme-secondary/40 border border-theme-border/50 overflow-x-auto">
+            <span className="text-[10px] font-mono text-theme-dim uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <span>{activeCategory.label}</span>
+              <span>/</span>
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {activeCategory.subTabs.map((sub) => {
+                const SubIcon = sub.icon || Table;
+                const isSubActive = activeTab === sub.id;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => setActiveTab(sub.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isSubActive
+                        ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/50 shadow-sm'
+                        : 'bg-theme-card/60 text-theme-muted hover:text-white hover:bg-theme-secondary border border-transparent hover:border-theme-border/60'
+                    }`}
+                  >
+                    <SubIcon className={`w-3 h-3 ${isSubActive ? 'text-cyan-400' : 'text-theme-dim'}`} />
+                    <span>{sub.label}</span>
+                    {sub.badge && (
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                        isSubActive ? 'bg-cyan-500/30 text-cyan-200' : 'bg-theme-secondary text-theme-dim'
+                      }`}>
+                        {sub.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* TAB 1: OVERVIEW */}
