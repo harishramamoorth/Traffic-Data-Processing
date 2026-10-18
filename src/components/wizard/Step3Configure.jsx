@@ -360,25 +360,84 @@ export default function Step3Configure() {
             </div>
 
             {/* Before vs After Risk Trade-Off Pill */}
-            {customConfig.riskReductionMode && customConfig.riskReductionMode !== 'none' && (
-              <div className="pt-1 flex items-center justify-between text-[11px] font-mono bg-theme-secondary/60 px-3 py-1.5 rounded-xl border border-theme-border/60">
-                <span className="text-theme-muted">Re-ID Risk Impact:</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 line-through">
-                    {beforeRisk}
-                  </span>
-                  <span className="text-theme-dim">→</span>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
-                    {afterRisk}
-                  </span>
-                </div>
+            <div className="pt-1 flex items-center justify-between text-[11px] font-mono bg-theme-secondary/60 px-3 py-1.5 rounded-xl border border-theme-border/60">
+              <span className="text-theme-muted">Re-ID Risk Impact:</span>
+              <div className="flex items-center gap-1.5">
+                <span className={`px-1.5 py-0.5 rounded ${
+                  beforeRisk === 'High' ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30' :
+                  beforeRisk === 'Medium' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' :
+                  'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  Before: {beforeRisk}
+                </span>
+                <span className="text-theme-dim">→</span>
+                <span className={`px-1.5 py-0.5 rounded font-bold ${
+                  afterRisk === 'High' ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30' :
+                  afterRisk === 'Medium' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' :
+                  'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  After: {afterRisk}
+                </span>
               </div>
-            )}
+            </div>
           </div>
 
           <p className="text-[10px] text-theme-dim leading-relaxed">
             Higher spatial/temporal generalization raises privacy score while trading analytical precision.
           </p>
+        </div>
+      </div>
+
+      {/* Quick Risk Reduction Selector Bar */}
+      <div className="p-4 rounded-2xl bg-theme-card border border-theme-border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-cyan-400" />
+          <span className="text-xs font-bold text-theme-text uppercase tracking-wider">
+            Risk Reduction Control
+          </span>
+          <span className="text-[11px] text-theme-dim">
+            (None / Suppress K / Aggregate)
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="quick-risk-reduction-select" className="text-xs font-semibold text-theme-muted">
+              Risk reduction:
+            </label>
+            <select
+              id="quick-risk-reduction-select"
+              aria-label="Risk reduction selector"
+              value={customConfig.riskReductionMode || 'none'}
+              onChange={(e) => updateConfig({
+                riskReductionMode: e.target.value,
+                suppressLowK: e.target.value === 'suppress'
+              })}
+              className="px-3 py-1.5 rounded-lg bg-theme-secondary border border-cyan-500/40 text-xs font-semibold text-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400 cursor-pointer"
+            >
+              <option value="none">None (Report only)</option>
+              <option value="suppress">Suppress K</option>
+              <option value="aggregate">Aggregate</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="quick-k-input" className="text-xs font-semibold text-theme-muted">
+              K input (2-10):
+            </label>
+            <input
+              id="quick-k-input"
+              aria-label="K input (2-10, default 3)"
+              type="number"
+              min="2"
+              max="10"
+              value={customConfig.kThreshold ?? 3}
+              onChange={(e) => updateConfig({
+                kThreshold: Math.max(2, Math.min(10, parseInt(e.target.value, 10) || 3))
+              })}
+              className="w-16 px-2.5 py-1.5 rounded-lg bg-theme-secondary border border-theme-border text-xs font-mono font-bold text-cyan-400 text-center focus:outline-none focus:border-cyan-400"
+            />
+          </div>
         </div>
       </div>
 
@@ -500,7 +559,7 @@ export default function Step3Configure() {
 
             {/* Risk Reduction Options (Item 3) */}
             <div className="p-5 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="text-xs font-semibold text-theme-text uppercase tracking-wider flex items-center gap-2">
                     <Shield className="w-4 h-4 text-cyan-400" />
@@ -510,21 +569,56 @@ export default function Step3Configure() {
                     Select mode for handling quasi-identifiers (timestamp, GPS, vehicle type, road segment).
                   </p>
                 </div>
-                {customConfig.riskReductionMode && customConfig.riskReductionMode !== 'none' && (
-                  <span className="px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 shrink-0">
-                    Enforcing k ≥ {customConfig.kThreshold ?? 3}
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="risk-reduction-select" className="text-xs font-semibold text-theme-muted">
+                      Risk reduction:
+                    </label>
+                    <select
+                      id="risk-reduction-select"
+                      aria-label="Risk reduction"
+                      value={customConfig.riskReductionMode || 'none'}
+                      onChange={(e) => updateConfig({
+                        riskReductionMode: e.target.value,
+                        suppressLowK: e.target.value === 'suppress'
+                      })}
+                      className="px-2.5 py-1.5 rounded-lg bg-theme-secondary border border-cyan-500/40 text-xs font-semibold text-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400 cursor-pointer"
+                    >
+                      <option value="none">None (Report only)</option>
+                      <option value="suppress">Suppress K</option>
+                      <option value="aggregate">Aggregate</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="k-threshold-input" className="text-xs font-semibold text-theme-muted">
+                      K input:
+                    </label>
+                    <input
+                      id="k-threshold-input"
+                      aria-label="K input (2-10, default 3)"
+                      type="number"
+                      min="2"
+                      max="10"
+                      value={customConfig.kThreshold ?? 3}
+                      onChange={(e) => updateConfig({
+                        kThreshold: Math.max(2, Math.min(10, parseInt(e.target.value, 10) || 3))
+                      })}
+                      className="w-14 px-2 py-1 rounded-lg bg-theme-secondary border border-theme-border text-xs font-mono font-bold text-cyan-400 text-center focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* Mode A: None */}
                 <div
                   id="risk-reduction-none"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => updateConfig({ riskReductionMode: 'none', suppressLowK: false })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     (!customConfig.riskReductionMode || customConfig.riskReductionMode === 'none')
-                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm'
+                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm ring-1 ring-cyan-500/30'
                       : 'bg-theme-secondary/40 border-theme-border hover:border-theme-border/80'
                   }`}
                 >
@@ -540,71 +634,78 @@ export default function Step3Configure() {
                 {/* Mode B: Suppress */}
                 <div
                   id="risk-reduction-suppress"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => updateConfig({ riskReductionMode: 'suppress', suppressLowK: true })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     customConfig.riskReductionMode === 'suppress'
-                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm'
+                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm ring-1 ring-cyan-500/30'
                       : 'bg-theme-secondary/40 border-theme-border hover:border-theme-border/80'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-theme-text">Suppress</span>
-                    <span className="text-[10px] font-mono text-cyan-400 uppercase">Enforce k ≥ K</span>
+                    <span className="text-xs font-bold text-theme-text">Suppress K</span>
+                    <span className="text-[10px] font-mono text-cyan-400 uppercase">Enforce k ≥ {customConfig.kThreshold ?? 3}</span>
                   </div>
                   <p className="text-[11px] text-theme-dim leading-relaxed">
-                    Generalizes step-by-step (15m → 60m, GPS 2 → 1 dec, vehicle → Other); moves any stubborn k &lt; K rows to suppressed count.
+                    Generalizes step-by-step (15m → 60m, GPS 2 → 1 dec, vehicle → Other); suppresses rows until k_min ≥ {customConfig.kThreshold ?? 3} and reports count.
                   </p>
                 </div>
 
                 {/* Mode C: Aggregate */}
                 <div
                   id="risk-reduction-aggregate"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => updateConfig({ riskReductionMode: 'aggregate', suppressLowK: false })}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     customConfig.riskReductionMode === 'aggregate'
-                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm'
+                      ? 'bg-cyan-500/10 border-cyan-500/60 shadow-sm ring-1 ring-cyan-500/30'
                       : 'bg-theme-secondary/40 border-theme-border hover:border-theme-border/80'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-bold text-theme-text">Aggregate</span>
-                    <span className="text-[10px] font-mono text-emerald-400 uppercase">Dual Dataset</span>
+                    <span className="text-[10px] font-mono text-emerald-400 uppercase">Dual Dataset (aggregated.csv)</span>
                   </div>
                   <p className="text-[11px] text-theme-dim leading-relaxed">
-                    Outputs a second aggregated dataset: 1 row per road segment per hour. Drops all microdata & suppresses cells &lt; K.
+                    Produces a second download "aggregated.csv" (1 row per road_segment per hour). Cells with count &lt; {customConfig.kThreshold ?? 3} are suppressed; zero microdata.
                   </p>
                 </div>
               </div>
 
-              {/* K Threshold Slider (2 to 10, default 3) */}
-              {customConfig.riskReductionMode && customConfig.riskReductionMode !== 'none' && (
-                <div className="pt-3 border-t border-theme-border/40 space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <label className="font-semibold text-theme-text flex items-center gap-1.5">
-                      <span>Threshold K</span>
-                      <span className="text-theme-dim text-[11px] font-normal font-mono">(Selectable 2 to 10, default 3)</span>
-                    </label>
+              {/* K Threshold Slider & Number Input (2 to 10, default 3) - ALWAYS VISIBLE */}
+              <div className="pt-3 border-t border-theme-border/40 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <label htmlFor="k-threshold-slider" className="font-semibold text-theme-text flex items-center gap-1.5">
+                    <span>Threshold K (2-10, default 3)</span>
+                    <span className="text-theme-dim text-[11px] font-normal font-mono">
+                      {customConfig.riskReductionMode === 'none' ? '(Applied when Suppress K or Aggregate is active)' : '(Enforced minimum cohort size)'}
+                    </span>
+                  </label>
+                  <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-cyan-400 font-bold bg-cyan-500/10 px-2.5 py-0.5 rounded border border-cyan-500/30">
                       K = {customConfig.kThreshold ?? 3}
                     </span>
                   </div>
-                  <input
-                    type="range"
-                    min="2"
-                    max="10"
-                    step="1"
-                    value={customConfig.kThreshold ?? 3}
-                    onChange={(e) => updateConfig({ kThreshold: parseInt(e.target.value, 10) })}
-                    className="w-full accent-cyan-400 cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] text-theme-dim font-mono">
-                    <span>K = 2 (Relaxed)</span>
-                    <span>K = 3 (Recommended)</span>
-                    <span>K = 5</span>
-                    <span>K = 10 (Strict)</span>
-                  </div>
                 </div>
-              )}
+                <input
+                  id="k-threshold-slider"
+                  type="range"
+                  min="2"
+                  max="10"
+                  step="1"
+                  value={customConfig.kThreshold ?? 3}
+                  onChange={(e) => updateConfig({ kThreshold: parseInt(e.target.value, 10) })}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-theme-dim font-mono">
+                  <span>K = 2 (Relaxed)</span>
+                  <span>K = 3 (Default)</span>
+                  <span>K = 5</span>
+                  <span>K = 10 (Strict)</span>
+                </div>
+              </div>
             </div>
 
             {/* PII Columns Grid (Item 5: 1 Card per entry in pii_columns with 6-action dropdown) */}

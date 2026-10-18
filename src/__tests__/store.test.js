@@ -64,4 +64,21 @@ describe('useWorkflowStore', () => {
     expect(scores.utilityScore).toBeGreaterThanOrEqual(0);
     expect(scores.utilityScore).toBeLessThanOrEqual(100);
   });
+
+  it('updates riskReductionMode and kThreshold and calculates risk shift', () => {
+    useWorkflowStore.getState().updateConfig({ riskReductionMode: 'suppress', kThreshold: 4 });
+    expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('suppress');
+    expect(useWorkflowStore.getState().customConfig.kThreshold).toBe(4);
+    expect(useWorkflowStore.getState().customConfig.suppressLowK).toBe(true);
+
+    const scores = useWorkflowStore.getState().calculateScores();
+    expect(scores.afterRisk).toBe('Low');
+    expect(scores.kThreshold).toBe(4);
+
+    useWorkflowStore.getState().updateConfig({ riskReductionMode: 'aggregate', kThreshold: 5 });
+    expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('aggregate');
+    expect(useWorkflowStore.getState().customConfig.kThreshold).toBe(5);
+    const aggScores = useWorkflowStore.getState().calculateScores();
+    expect(aggScores.afterRisk).toContain('Low');
+  });
 });
