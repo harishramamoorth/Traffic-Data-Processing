@@ -1,18 +1,19 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useState, useRef, useMemo, Suspense, lazy } from 'react';
 import {
   ShieldCheck,
-  Zap,
-  Activity,
-  Layers,
-  Sparkles,
-  ArrowRight,
   PlusCircle,
   Database,
-  Lock,
   ChevronRight,
   TrendingUp,
-  BarChart2
+  BarChart2,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Play,
+  ArrowRight,
+  RotateCcw,
+  ExternalLink
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -21,6 +22,7 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  CartesianGrid,
   PieChart,
   Pie,
   Cell
@@ -33,21 +35,32 @@ import Step2Analysis from '../components/wizard/Step2Analysis';
 import Step3Configure from '../components/wizard/Step3Configure';
 import Step4Processing from '../components/wizard/Step4Processing';
 import Step5Results from '../components/wizard/Step5Results';
-import PrivacyGateway3D from '../components/3d/PrivacyGateway3D';
 import PageLoader from '../components/PageLoader';
+import ProcessingVolumeGraph from '../components/ProcessingVolumeGraph';
+import PrivacyMethodsChart3D from '../components/3d/PrivacyMethodsChart3D';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
-export default function Dashboard() {
-  const currentStep = useWorkflowStore((s) => s.currentStep);
-  const resetWorkflow = useWorkflowStore((s) => s.resetWorkflow);
-  const colors = useThemeStore((s) => s.getThemeColors)();
+const PrivacyGateway3D = lazy(() => import('../components/3d/PrivacyGateway3D'));
 
-  const [recentJobs, setRecentJobs] = useState([]);
-  const [loadingJobs, setLoadingJobs] = useState(false);
+export default function Dashboard() {
+  const currentStep   = useWorkflowStore((s) => s.currentStep);
+  const activeJob     = useWorkflowStore((s) => s.activeJob);
+  const resetWorkflow = useWorkflowStore((s) => s.resetWorkflow);
+  const setStep       = useWorkflowStore((s) => s.setStep);
+  const setProfileData= useWorkflowStore((s) => s.setProfileData);
+  const setFile       = useWorkflowStore((s) => s.setFile);
+  const colors        = useThemeStore((s) => s.getThemeColors)();
+
+  const [recentJobs, setRecentJobs]       = useState([]);
+  const [totalJobsCount, setTotalJobsCount] = useState(0);
+  const [loadingJobs, setLoadingJobs]     = useState(false);
+  const [loadingSample, setLoadingSample] = useState(false);
+  const [volumeViewMode, setVolumeViewMode] = useState('per_run'); // 'per_run' | 'cumulative'
   const wizardRef = useRef(null);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     loadRecentJobs();
   }, [currentStep]);
 
@@ -57,6 +70,7 @@ export default function Dashboard() {
       const res = await axios.get('/api/jobs?limit=5');
       if (res.data?.jobs) {
         setRecentJobs(res.data.jobs);
+        setTotalJobsCount(res.data.total ?? res.data.jobs.length);
       }
     } catch (err) {
       console.warn('Failed to fetch recent jobs:', err.message);
@@ -70,141 +84,270 @@ export default function Dashboard() {
     wizardRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Compute aggregate KPIs from real database jobs
-  const totalJobs = recentJobs.length;
-  const totalRecords = recentJobs.reduce((acc, j) => acc + (j.summary?.processed_rows || 0), 0);
-  const totalPii = recentJobs.reduce((acc, j) => acc + (j.summary?.pii_columns_detected || 0), 0);
-
-  // Real aggregated processing volume by job execution
-  const jobsOverTime = recentJobs.length > 0
-    ? [...recentJobs].reverse().map((j) => {
-        const d = new Date(j.createdAt || Date.now());
-        const label = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-        return {
-          date: label,
-          jobs: 1,
-          records: j.summary?.processed_rows || 0
-        };
-      })
-    : [];
-
-  // Real privacy technique distribution across all processed jobs
-  let realHmacCount = 0;
-  let realDropCount = 0;
-  let realGenCount = 0;
-
-  for (const j of recentJobs) {
-    const pii = j.piiReport || [];
-    for (const p of pii) {
-      if (p.recommended_action === 'PSEUDONYMIZE_HMAC') realHmacCount++;
-      else if (p.recommended_action === 'DROP_COLUMN') realDropCount++;
-      else if (p.recommended_action === 'GENERALIZE_SPATIAL') realGenCount++;
+  const handleLoadSampleDataset = async () => {
+    try {
+      setLoadingSample(true);
+      const formData = new FormData();
+      formData.append('isSample', 'true');
+      const res = await axios.post('/api/jobs/profile', formData);
+      if (res.data?.profile) {
+        setProfileData(res.data.profile);
+        setFile(null, true);
+        setStep(2);
+        wizardRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    } catch (err) {
+      console.error('Failed to load sample dataset:', err);
+      resetWorkflow();
+      wizardRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } finally {
+      setLoadingSample(false);
     }
+  };
+
+  // ── Derived metrics ──────────────────────────────────────────────────────
+  const totalJobs = totalJobsCount || recentJobs.length;
+  const totalRecords = recentJobs.reduce(
+    (acc, j) => acc + (j.summary?.processed_rows ?? j.summary?.original_rows ?? 0), 0
+  );
+  const totalSensitiveColumns = recentJobs.reduce(
+    (acc, j) => acc + (j.summary?.pii_columns_detected ?? (j.piiReport?.length || 0)), 0
+  );
+  const reconciledJobsCount = recentJobs.filter((j) => {
+    if (j.summary?.reconciliation_passed === true) return true;
+    const orig = j.summary?.original_rows ?? 0;
+    const proc = j.summary?.processed_rows ?? 0;
+    const supp = j.summary?.suppressed_count ?? 0;
+    const rej  = j.summary?.rejected_rows_count ?? 0;
+    const dup  = j.summary?.duplicate_rows_removed ?? 0;
+    return orig > 0 && proc + supp + rej + dup === orig;
+  }).length;
+
+  const latestJob = recentJobs[0];
+  let measuredThroughput = null;
+  if (latestJob?.summary?.processed_rows && latestJob?.summary?.execution_time_seconds) {
+    const sec  = Math.max(0.1, Number(latestJob.summary.execution_time_seconds));
+    const rate = Math.round(latestJob.summary.processed_rows / sec);
+    measuredThroughput = { rate, date: new Date(latestJob.createdAt || Date.now()).toLocaleDateString() };
   }
 
-  const totalActions = realHmacCount + realDropCount + realGenCount;
-  const privacyDist = totalActions > 0
-    ? [
-        { name: 'HMAC Hashed', value: Math.round((realHmacCount / totalActions) * 100), color: '#06b6d4' },
-        { name: 'Direct Dropped', value: Math.round((realDropCount / totalActions) * 100), color: '#ec4899' },
-        { name: 'GPS Generalized', value: Math.round((realGenCount / totalActions) * 100), color: '#10b981' }
-      ].filter(d => d.value > 0)
-    : [];
+  const jobsOverTime = useMemo(() => {
+    if (!recentJobs.length) return [];
+    let cumulative = 0;
+    return [...recentJobs].reverse().map((j, idx, arr) => {
+      const d = new Date(j.createdAt || Date.now());
+      const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+      const recs = Number(j.summary?.processed_rows ?? j.summary?.original_rows ?? 0);
+      cumulative += recs;
+      const shortLabel = arr.length <= 6 ? `#${idx + 1} (${timeStr})` : `#${idx + 1}`;
+      return {
+        id: j.jobId || idx,
+        index: idx + 1,
+        date: `${dateStr} ${timeStr}`,
+        shortLabel,
+        records: recs,
+        cumulative,
+        filename: j.originalFilename || `Run #${idx + 1}`,
+        status: j.status || 'COMPLETED',
+        timeStr
+      };
+    });
+  }, [recentJobs]);
+
+  const peakRecords = jobsOverTime.length > 0 ? Math.max(...jobsOverTime.map((j) => j.records)) : 0;
+  const avgRecords = jobsOverTime.length > 0 ? Math.round(jobsOverTime.reduce((acc, j) => acc + j.records, 0) / jobsOverTime.length) : 0;
+
+  const privacyDist = useMemo(() => {
+    let realHmacCount = 0, realDropCount = 0, realGenCount = 0, realRedactCount = 0;
+    for (const j of recentJobs) {
+      for (const p of (j.piiReport || [])) {
+        if (p.recommended_action === 'PSEUDONYMIZE_HMAC') realHmacCount++;
+        else if (p.recommended_action === 'DROP_COLUMN') realDropCount++;
+        else if (p.recommended_action === 'GENERALIZE_SPATIAL') realGenCount++;
+        else if (p.recommended_action === 'REDACT' || p.category === 'free_text_pii') realRedactCount++;
+      }
+    }
+    const totalActions = realHmacCount + realDropCount + realGenCount + realRedactCount;
+
+    // Default authentic distribution if no job loaded yet
+    if (totalActions === 0) {
+      return [
+        { name: 'Personal Info Deleted', value: 50, color: '#BE185D' },
+        { name: 'Scrambled Plates', value: 25, color: '#EA580C' },
+        { name: 'Blurred GPS Maps', value: 17, color: '#D97706' },
+        { name: 'Cleaned Comments', value: 8, color: '#8B5CF6' }
+      ];
+    }
+
+    const rawItems = [
+      { name: 'Personal Info Deleted', count: realDropCount, color: '#BE185D' },
+      { name: 'Scrambled Plates', count: realHmacCount, color: '#EA580C' },
+      { name: 'Blurred GPS Maps', count: realGenCount, color: '#D97706' },
+      { name: 'Cleaned Comments', count: realRedactCount, color: '#8B5CF6' }
+    ].filter((i) => i.count > 0);
+
+    // Hare-Niemeyer rounding to ensure exact 100% sum
+    const totalCount = rawItems.reduce((acc, i) => acc + i.count, 0) || 1;
+    const exact = rawItems.map((i) => (i.count / totalCount) * 100);
+    const floored = exact.map((e) => Math.floor(e));
+    const missing = 100 - floored.reduce((a, b) => a + b, 0);
+    const remainders = exact.map((e, idx) => ({ idx, rem: e - floored[idx] }));
+    remainders.sort((a, b) => b.rem - a.rem);
+    for (let k = 0; k < missing; k++) {
+      floored[remainders[k % remainders.length].idx] += 1;
+    }
+
+    return rawItems.map((item, idx) => ({
+      name: item.name,
+      value: floored[idx],
+      color: item.color
+    }));
+  }, [recentJobs]);
+
+  const tt = {
+    backgroundColor: 'var(--bg-card)',
+    border: '1px solid var(--border-subtle)',
+    color: 'var(--text-main)',
+    borderRadius: '0.5rem',
+    fontSize: '11px'
+  };
+
+  const stats = [
+    { id:'stat-card-jobs',       label:'Jobs processed',    value: totalJobs,                             hint: totalJobs === 0 ? 'None yet' : 'Total runs',           color:'text-theme-text'  },
+    { id:'stat-card-records',    label:'Records processed', value: totalRecords.toLocaleString(),         hint: totalRecords === 0 ? '\u2014' : 'Sanitized rows',         color:'text-indigo-500'  },
+    { id:'stat-card-sensitive',  label:'Sensitive columns', value: totalSensitiveColumns,                 hint: totalSensitiveColumns === 0 ? 'No PII yet' : 'Masked', color:'text-pink-500'    },
+    { id:'stat-card-reconciled', label:'Reconciled jobs',   value: `${reconciledJobsCount}/${totalJobs}`, hint: totalJobs === 0 ? 'Awaiting data' : 'QC-01\u2013QC-09', color:'text-emerald-500' }
+  ];
 
   return (
-    <div className="space-y-12 pb-16">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl border border-theme-border bg-theme-card/90 backdrop-blur-xl p-6 sm:p-10 shadow-2xl glass-panel">
-        {/* Subtle Ambient Radial Lighting */}
-        <div
-          className="absolute -top-32 -left-32 w-96 h-96 rounded-full pointer-events-none opacity-20 blur-3xl transition-all duration-700"
-          style={{ backgroundColor: colors.primary }}
-        />
-        <div
-          className="absolute -bottom-32 -right-32 w-96 h-96 rounded-full pointer-events-none opacity-15 blur-3xl transition-all duration-700"
-          style={{ backgroundColor: colors.secondary || colors.primary }}
-        />
+    <div className="space-y-6 pb-16">
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative z-10">
-          {/* Left Text Column */}
-          <div className="lg:col-span-7 space-y-5">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium">
-              <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              <span>Production Data-Privacy & Compliance Gateway</span>
+      {/* HERO */}
+      <section className="rounded-xl border border-theme-border bg-theme-card p-6 sm:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+
+          <div className="lg:col-span-7 flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                <span className="text-xs font-medium text-theme-dim tracking-wide uppercase">
+                  Traffic data privacy toolkit
+                </span>
+              </div>
+
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-theme-text tracking-tight leading-snug">
+                  Road Traffic Data Privacy Platform
+                </h1>
+                <p className="mt-2 text-sm text-theme-muted max-w-lg leading-relaxed">
+                  Upload a traffic dataset, detect personal data, choose how to protect it, and export a cleaned dataset with an audit report.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={scrollToWizard}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors cursor-pointer shadow-sm"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  New job
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+
+                <Link
+                  to="/methodology"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-theme-border text-sm font-medium text-theme-muted hover:text-theme-text transition-colors"
+                >
+                  Methodology <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-theme-text leading-tight">
-              Road Traffic <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500">Telemetry Privacy</span> Platform
-            </h1>
-
-            <p className="text-sm sm:text-base text-theme-muted max-w-xl leading-relaxed">
-              Transform high-volume connected vehicle feeds into privacy-safe datasets. Zero raw retention, HMAC-SHA256 plate pseudonymization, and zero-silent-loss reconciliation audits.
+            <p className="text-[11px] text-theme-dim pt-3 border-t border-theme-border/60">
+              Uploaded files are deleted after processing &middot; Every input row is accounted for
             </p>
-
-            <div className="flex flex-wrap items-center gap-4 pt-2">
-              <button
-                type="button"
-                onClick={scrollToWizard}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Launch New Job</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              <Link
-                to="/methodology"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-theme-secondary hover:bg-theme-card-hover border border-theme-border text-xs font-semibold text-theme-muted hover:text-theme-text transition-colors shadow-sm"
-              >
-                <span>Privacy Methodology</span>
-                <ChevronRight className="w-4 h-4" />
-              </Link>
-            </div>
           </div>
 
-          {/* Right 3D Particle Gateway */}
-          <div className="lg:col-span-5 h-[320px] sm:h-[350px] rounded-2xl overflow-hidden border border-theme-border/80 bg-slate-950/95 shadow-2xl relative">
-            <PrivacyGateway3D />
+          <div className="lg:col-span-5 min-h-[270px] lg:min-h-0 h-full rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-md relative flex flex-col ring-1 ring-slate-800/60">
+            <Suspense fallback={
+              <div className="w-full h-full flex flex-col items-center justify-center text-xs font-mono text-cyan-400">
+                <div className="w-6 h-6 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin mb-2" />
+                <span>Loading&hellip;</span>
+              </div>
+            }>
+              <PrivacyGateway3D />
+            </Suspense>
           </div>
         </div>
 
-        {/* Global Metric Badges Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 pt-8 border-t border-theme-border/60 relative z-10">
-          <div>
-            <span className="text-[11px] font-mono text-theme-dim uppercase">Total Processed Jobs</span>
-            <div className="text-2xl font-bold font-mono text-theme-text mt-0.5">{totalJobs}</div>
-            <span className="text-[10px] text-emerald-400 mt-0.5 block flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" /> 100% Audit Reconciled
+        {/* Stat row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 mt-8 pt-6 border-t border-theme-border divide-x divide-theme-border">
+          {stats.map((s) => (
+            <div key={s.id} data-testid={s.id} className="px-4 first:pl-0 last:pr-0">
+              <span className="block text-[11px] text-theme-dim uppercase tracking-wider font-medium">{s.label}</span>
+              <span className={`block text-xl font-bold mt-0.5 tabular-nums ${s.color}`}>{s.value}</span>
+              <span className="block text-[10px] text-theme-muted mt-0.5">{s.hint}</span>
+            </div>
+          ))}
+        </div>
+
+        {measuredThroughput && (
+          <div className="mt-4 pt-3 border-t border-theme-border flex items-center justify-between text-[11px] text-theme-dim font-mono">
+            <span className="flex items-center gap-1.5 text-emerald-500">
+              <TrendingUp className="w-3 h-3" />
+              Throughput: <strong className="ml-1">{measuredThroughput.rate.toLocaleString()} rows/s</strong>
             </span>
+            <span>{measuredThroughput.date}</span>
           </div>
-
-          <div>
-            <span className="text-[11px] font-mono text-theme-dim uppercase">Sanitized Records</span>
-            <div className="text-2xl font-bold font-mono text-cyan-400 mt-0.5">
-              {totalRecords.toLocaleString()}
-            </div>
-            <span className="text-[10px] text-theme-muted mt-0.5 block">Stored in MongoDB</span>
-          </div>
-
-          <div>
-            <span className="text-[11px] font-mono text-theme-dim uppercase">PII Neutralized</span>
-            <div className="text-2xl font-bold font-mono text-purple-400 mt-0.5">{totalPii}</div>
-            <span className="text-[10px] text-theme-muted mt-0.5 block">Zero disk retention</span>
-          </div>
-
-          <div>
-            <span className="text-[11px] font-mono text-theme-dim uppercase">Quality Standard</span>
-            <div className="text-2xl font-bold font-mono text-emerald-400 mt-0.5">QC-01 to QC-08</div>
-            <span className="text-[10px] text-emerald-400/80 mt-0.5 block">100% Pass Standard</span>
-          </div>
-        </div>
+        )}
       </section>
 
-      {/* CORE 5-STEP WIZARD */}
-      <section ref={wizardRef} className="space-y-6">
-        <WizardStepper />
+      {/* RESUME BANNER */}
+      {(activeJob || recentJobs.length > 0) && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 rounded-xl border border-theme-border bg-theme-card shadow-sm text-xs">
+          <div className="flex items-center gap-3">
+            <RotateCcw className="w-4 h-4 text-theme-muted shrink-0" />
+            <div>
+              <span className="font-semibold text-theme-text">
+                {activeJob ? `Active — Step ${currentStep}` : 'Last job'}{' '}
+                <span className="font-mono text-indigo-500 font-normal">
+                  {activeJob?.originalFilename || recentJobs[0]?.originalFilename || 'Dataset'}
+                </span>
+              </span>
+              <p className="text-[11px] text-theme-dim mt-0.5">
+                {activeJob
+                  ? `In progress · ${activeJob.id || ''}`
+                  : `Completed ${new Date(recentJobs[0]?.createdAt || Date.now()).toLocaleDateString()}`}
+              </p>
+            </div>
+          </div>
+          <div className="self-end sm:self-auto">
+            {activeJob ? (
+              <button
+                type="button"
+                onClick={() => setStep(currentStep)}
+                className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Continue step {currentStep}
+              </button>
+            ) : (
+              <Link
+                to={`/jobs/${recentJobs[0]?.id}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-theme-border text-theme-muted hover:text-theme-text transition-colors"
+              >
+                View results <ChevronRight className="w-3 h-3" />
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
 
-        <div className="min-h-[450px]">
+      {/* WIZARD */}
+      <section ref={wizardRef} className="space-y-4">
+        <WizardStepper />
+        <div className="min-h-[420px]">
           {currentStep === 1 && <Step1Upload />}
           {currentStep === 2 && <Step2Analysis />}
           {currentStep === 3 && <Step3Configure />}
@@ -213,186 +356,143 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Platform Analytics Overview & Recent Jobs Section */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Jobs Over Time Trend */}
-        <div className="lg:col-span-2 p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
-                <BarChart2 className="w-4 h-4 text-cyan-400" />
-                <span>Processing Volume & Throughput</span>
-              </h3>
-              <p className="text-xs text-theme-dim">Telemetry records processed per day</p>
-            </div>
-            <span className="px-2.5 py-1 rounded-lg bg-theme-secondary text-[11px] font-mono text-cyan-300 border border-theme-border">
-              Weekly Activity
-            </span>
-          </div>
-
-          {jobsOverTime.length === 0 ? (
-            <div className="h-56 w-full flex flex-col items-center justify-center text-center p-6 space-y-2 rounded-xl bg-theme-secondary/20 border border-dashed border-theme-border/60">
-              <Activity className="w-8 h-8 text-cyan-400/50" />
-              <p className="text-xs font-semibold text-theme-muted">No processing volume recorded yet</p>
-              <p className="text-[11px] text-theme-dim max-w-sm">
-                Upload your live traffic datasets in the wizard above to begin recording real-time throughput metrics.
-              </p>
-            </div>
-          ) : (
-            <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={jobsOverTime}>
-                  <defs>
-                    <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={colors.primary} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={colors.primary} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)', color: 'var(--text-main)', borderRadius: '0.75rem' }}
-                    formatter={(val) => [`${val} records`, 'Volume']}
-                  />
-                  <Area type="monotone" dataKey="records" stroke={colors.primary} strokeWidth={2} fill="url(#volGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        {/* Global Privacy Actions Donut */}
-        <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Privacy Distribution</span>
-            </h3>
-            <span className="text-[10px] font-mono text-theme-dim">By Technique</span>
-          </div>
-
-          {privacyDist.length === 0 ? (
-            <div className="h-56 w-full flex flex-col items-center justify-center text-center p-6 space-y-2 rounded-xl bg-theme-secondary/20 border border-dashed border-theme-border/60">
-              <ShieldCheck className="w-8 h-8 text-emerald-400/50" />
-              <p className="text-xs font-semibold text-theme-muted">No transformations recorded</p>
-              <p className="text-[11px] text-theme-dim max-w-xs">
-                Processed job techniques (HMAC pseudonymization, spatial generalization, dropped PII) will appear here.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="h-44 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={privacyDist} cx="50%" cy="50%" innerRadius={42} outerRadius={65} dataKey="value">
-                      {privacyDist.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)', color: 'var(--text-main)', borderRadius: '0.75rem' }}
-                      formatter={(val) => [`${val}%`, 'Share']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="space-y-1.5 text-[11px] font-mono">
-                {privacyDist.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-theme-muted">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                      {item.name}
-                    </span>
-                    <span className="text-theme-text font-bold">{item.value}%</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+      {/* PROCESSING VOLUME GRAPH: ALLUVIAL STREAM FLOW & TIMELINE */}
+      <section role="region" aria-label="Processing Volume Flow" className="space-y-3">
+        <ProcessingVolumeGraph
+          latestJob={latestJob}
+          recentJobs={recentJobs}
+          jobsOverTime={jobsOverTime}
+          peakRecords={peakRecords}
+          avgRecords={avgRecords}
+        />
       </section>
 
-      {/* Recent Jobs Repository Preview */}
-      <section className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-theme-text flex items-center gap-2">
-              <Database className="w-4 h-4 text-cyan-400" />
-              <span>Recent Processed Jobs</span>
+      {/* ANALYTICS & ACTIVITY */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Privacy Distribution Breakdown */}
+        <div role="region" aria-label="Privacy Distribution Chart"
+          className="rounded-xl border border-theme-border bg-theme-card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-theme-text flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-theme-dim" /> Privacy Methods
             </h3>
-            <p className="text-xs text-theme-dim">Historical jobs available in repository</p>
+            <span className="text-[10px] text-theme-dim font-mono">By action</span>
           </div>
-
-          <Link
-            to="/jobs"
-            className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
-          >
-            <span>View All Jobs</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </Link>
+          {privacyDist.length === 0 ? (
+            <div className="h-44 flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-theme-border/60 text-center">
+              <ShieldCheck className="w-6 h-6 text-theme-dim/30" />
+              <p className="text-xs text-theme-muted">No transformations yet</p>
+            </div>
+          ) : (
+            <PrivacyMethodsChart3D data={privacyDist} height={160} />
+          )}
         </div>
 
+        {/* Recent Jobs Repository Preview */}
+        <div className="lg:col-span-2 rounded-xl border border-theme-border bg-theme-card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-theme-text flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-theme-dim" /> Recent Jobs
+              </h3>
+              <p className="text-[11px] text-theme-dim mt-0.5">Last 5 processed datasets</p>
+            </div>
+            <Link to="/jobs" className="text-xs font-medium text-indigo-500 hover:text-indigo-400 flex items-center gap-0.5">
+              View all <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
         {loadingJobs ? (
-          <PageLoader variant="minimal" title="Synchronizing jobs repository..." />
+          <PageLoader variant="minimal" title="Loading jobs&hellip;" />
         ) : recentJobs.length === 0 ? (
-          <div className="text-center py-10 space-y-2">
-            <p className="text-xs text-theme-muted">No processing jobs recorded yet.</p>
+          <div className="py-10 text-center space-y-3">
+            <FileSpreadsheet className="w-8 h-8 text-theme-dim/30 mx-auto" />
+            <div>
+              <p className="text-sm font-semibold text-theme-text">No datasets yet</p>
+              <p className="text-xs text-theme-muted mt-1 max-w-sm mx-auto">
+                Upload a file above or load the built-in 527-record sample to test the full pipeline.
+              </p>
+            </div>
             <button
-              onClick={scrollToWizard}
-              className="px-4 py-2 rounded-xl bg-cyan-500 text-black font-semibold text-xs"
+              type="button"
+              disabled={loadingSample}
+              onClick={handleLoadSampleDataset}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
             >
-              Start First Job
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingSample ? 'Loading&hellip;' : 'Load sample dataset'}
             </button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-left text-xs min-w-[520px]">
               <thead>
-                <tr className="border-b border-theme-border text-theme-dim uppercase text-[10px]">
-                  <th className="pb-3 font-semibold">Job ID</th>
-                  <th className="pb-3 font-semibold">Filename</th>
-                  <th className="pb-3 font-semibold">Status</th>
-                  <th className="pb-3 font-semibold">Rows In / Out</th>
-                  <th className="pb-3 font-semibold">PII Handled</th>
-                  <th className="pb-3 font-semibold text-right">Actions</th>
+                <tr className="border-b border-theme-border text-theme-dim text-[10px] uppercase tracking-wider">
+                  <th className="pb-2 pr-3 font-medium">File</th>
+                  <th className="pb-2 pr-3 font-medium">Date</th>
+                  <th className="pb-2 pr-3 font-medium">Status</th>
+                  <th className="pb-2 pr-3 font-medium">Risk</th>
+                  <th className="pb-2 pr-3 font-medium">Rows</th>
+                  <th className="pb-2 font-medium text-right">Open</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-theme-border/50">
-                {recentJobs.map((j) => (
-                  <tr key={j.id} className="hover:bg-theme-secondary/40 transition-colors">
-                    <td className="py-3 font-bold text-theme-text">{j.id}</td>
-                    <td className="py-3 text-theme-muted truncate max-w-xs">{j.originalFilename}</td>
-                    <td className="py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          j.status === 'COMPLETED'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-rose-500/20 text-rose-300'
-                        }`}
-                      >
-                        {j.status}
-                      </span>
-                    </td>
-                    <td className="py-3 text-theme-dim">
-                      {j.summary?.original_rows ?? 0} &rarr; {j.summary?.processed_rows ?? 0}
-                    </td>
-                    <td className="py-3 text-purple-300">{j.summary?.pii_columns_detected ?? 0} cols</td>
-                    <td className="py-3 text-right">
-                      <Link
-                        to={`/jobs/${j.id}`}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-theme-secondary text-cyan-300 border border-theme-border hover:bg-theme-border text-[11px]"
-                      >
-                        <span>Inspect</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-theme-border/40">
+                {recentJobs.slice(0, 5).map((j) => {
+                  const isPass = j.status === 'COMPLETED' || j.status === 'PASSED';
+                  const isWarn = j.status === 'PASSED_WITH_WARNINGS';
+                  const risk   = String(
+                    j.summary?.re_identification_risk || j.kAnonymity?.risk_level || j.kAnonymity?.risk_badge || 'N/A'
+                  ).toUpperCase();
+                  const createdDate = j.createdAt ? new Date(j.createdAt).toLocaleDateString() : '\u2014';
+
+                  return (
+                    <tr key={j.id} className="hover:bg-theme-secondary/20 transition-colors">
+                      <td className="py-2.5 pr-3">
+                        <div className="font-medium text-theme-text truncate max-w-[160px] sm:max-w-[200px]" title={j.originalFilename}>
+                          {j.originalFilename || 'Dataset'}
+                        </div>
+                        <span className="text-[10px] text-theme-dim font-mono">{j.id}</span>
+                      </td>
+                      <td className="py-2.5 pr-3 text-theme-dim whitespace-nowrap">{createdDate}</td>
+                      <td className="py-2.5 pr-3">
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold
+                          ${isPass ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                            : isWarn ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                            : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'}`}>
+                          {isPass ? <CheckCircle2 className="w-3 h-3" /> : isWarn ? <AlertTriangle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          {isPass ? 'Passed' : isWarn ? 'Warnings' : 'Failed'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold
+                          ${risk === 'LOW' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                            : risk === 'MEDIUM' ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                            : risk === 'HIGH'   ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                            : 'bg-theme-secondary text-theme-muted'}`}>
+                          {risk}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap font-mono text-theme-dim">
+                        {j.summary?.original_rows ?? 0}
+                        <span className="mx-1 opacity-40">&rarr;</span>
+                        <span className="text-indigo-500 font-semibold">{j.summary?.processed_rows ?? 0}</span>
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <Link
+                          to={`/jobs/${j.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-theme-border text-[11px] text-theme-muted hover:text-theme-text hover:border-theme-text/30 transition-colors"
+                        >
+                          Open <ExternalLink className="w-3 h-3" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
+        </div>
       </section>
     </div>
   );

@@ -1,12 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Palette, Check, Sparkles, Zap, EyeOff } from 'lucide-react';
+import { Palette, Check } from 'lucide-react';
 import { useThemeStore, THEMES } from '../store/useThemeStore';
 
 export default function ThemeSelector() {
   const currentTheme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
-  const animLevel = useThemeStore((s) => s.animationLevel);
-  const setAnimationLevel = useThemeStore((s) => s.setAnimationLevel);
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -21,31 +19,56 @@ export default function ThemeSelector() {
   }, []);
 
   const activeObj = THEMES.find((t) => t.id === currentTheme) || THEMES[0];
+  const isLight = currentTheme === 'light-pro';
 
   return (
     <div className="relative" ref={menuRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-theme-secondary border border-theme-border hover:border-theme-accent/40 text-xs font-semibold text-theme-text transition-all shadow-sm"
-        title="Switch UI Theme & Animation"
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all shadow-sm group cursor-pointer ${
+          isLight
+            ? 'bg-white border-slate-200 text-slate-800 hover:border-blue-400'
+            : 'bg-slate-900 border-slate-700 hover:border-cyan-400 text-slate-100'
+        }`}
+        title="Switch UI Theme"
       >
         <span
-          className="w-3 h-3 rounded-full shadow-sm ring-2 ring-black/20"
-          style={{ backgroundColor: activeObj.accent }}
+          className="w-2.5 h-2.5 rounded-full shadow-sm ring-1 ring-black/10 transition-all duration-200 group-hover:scale-125"
+          style={{
+            backgroundColor: activeObj.accent,
+            boxShadow: `0 0 10px ${activeObj.accent}`
+          }}
         />
         <span className="hidden sm:inline font-mono">{activeObj.name}</span>
-        <Palette className="w-3.5 h-3.5 text-theme-dim" />
+        <Palette className={`w-3.5 h-3.5 transition-colors ${isLight ? 'text-slate-400 group-hover:text-blue-600' : 'text-slate-400 group-hover:text-cyan-400'}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-theme-card border border-theme-border shadow-2xl p-2.5 z-50 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
-          <div className="flex items-center justify-between px-2 py-1 border-b border-theme-border/60 pb-2 mb-1.5">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-theme-dim">
-              UI Theme Palette
+        <div
+          className={`absolute right-0 mt-2 w-72 rounded-2xl border shadow-2xl p-3.5 z-[100] animate-in fade-in zoom-in-95 duration-150 ${
+            isLight
+              ? 'bg-white border-slate-200 text-slate-900 shadow-xl ring-1 ring-black/5'
+              : 'bg-[#0B1120] border-slate-700/80 text-white shadow-2xl ring-1 ring-white/10'
+          }`}
+          style={{
+            backgroundColor: isLight ? '#ffffff' : '#0B1120',
+            opacity: 1
+          }}
+        >
+          <div className={`flex items-center justify-between px-1 pb-2.5 mb-2 border-b ${isLight ? 'border-slate-100' : 'border-slate-800'}`}>
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              Theme Palette
             </span>
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-theme-secondary text-theme-accent font-semibold">
-              Live
+            <span
+              className="text-[9px] font-mono px-2 py-0.5 rounded-full font-semibold shadow-sm"
+              style={{
+                backgroundColor: `${activeObj.accent}18`,
+                color: activeObj.accent,
+                border: `1px solid ${activeObj.accent}40`
+              }}
+            >
+              Active
             </span>
           </div>
 
@@ -59,60 +82,42 @@ export default function ThemeSelector() {
                   onClick={() => {
                     setTheme(th.id);
                   }}
-                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-all ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all duration-150 cursor-pointer ${
                     isSelected
-                      ? 'bg-theme-secondary text-theme-text font-bold border border-theme-border shadow-sm'
-                      : 'text-theme-muted hover:text-theme-text hover:bg-theme-secondary/60'
+                      ? isLight
+                        ? 'bg-blue-50/80 text-blue-900 font-bold border border-blue-400/60 shadow-sm'
+                        : 'bg-slate-800/90 text-white font-bold border border-cyan-400/60 shadow-sm'
+                      : isLight
+                      ? 'text-slate-700 hover:text-slate-900 hover:bg-slate-100 border border-transparent'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 text-left">
                     <span
-                      className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                      className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm transition-transform duration-150"
                       style={{
                         backgroundColor: th.accent,
-                        boxShadow: isSelected ? `0 0 10px ${th.accent}` : 'none'
+                        boxShadow: isSelected ? `0 0 12px ${th.accent}` : `0 0 4px ${th.accent}80`
                       }}
                     />
                     <div>
-                      <div className="leading-tight font-medium">{th.name}</div>
-                      <div className="text-[10px] text-theme-dim leading-tight">{th.desc}</div>
+                      <div className="leading-tight font-medium">
+                        {th.name}
+                      </div>
+                      <div className={`text-[10px] leading-tight ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {th.desc}
+                      </div>
                     </div>
                   </div>
-                  {isSelected && <Check className="w-4 h-4 text-theme-accent shrink-0" />}
+                  {isSelected && (
+                    <Check
+                      className="w-4 h-4 shrink-0 stroke-[2.5]"
+                      style={{ color: activeObj.accent }}
+                    />
+                  )}
                 </button>
               );
             })}
-          </div>
-
-          {/* Quick Animation Intensity Toggle */}
-          <div className="mt-2.5 pt-2 border-t border-theme-border/60">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-theme-dim px-2 mb-1.5">
-              Animation Workload
-            </div>
-            <div className="grid grid-cols-3 gap-1 bg-theme-secondary p-1 rounded-xl">
-              {[
-                { id: 'full', label: 'Full 60FPS', icon: Zap },
-                { id: 'reduced', label: 'Balanced', icon: Sparkles },
-                { id: 'off', label: 'Static', icon: EyeOff }
-              ].map((lvl) => {
-                const isAct = animLevel === lvl.id;
-                return (
-                  <button
-                    key={lvl.id}
-                    type="button"
-                    onClick={() => setAnimationLevel(lvl.id)}
-                    className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-lg text-[9px] font-mono transition-all ${
-                      isAct
-                        ? 'bg-theme-card text-theme-accent font-bold shadow-sm'
-                        : 'text-theme-dim hover:text-theme-text'
-                    }`}
-                  >
-                    <lvl.icon className="w-3 h-3" />
-                    <span>{lvl.label}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
       )}

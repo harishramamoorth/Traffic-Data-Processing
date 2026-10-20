@@ -70,7 +70,7 @@ export default function RecordsTable({ jobId }) {
         }}
       >
         <div>
-          <h3 style={{ fontSize: '1.15rem' }}>🗃️ Anonymized Records Repository</h3>
+          <h3 style={{ fontSize: '1.15rem' }}>🗃️ Pseudonymized Records Repository</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             Paginated database records stored in MongoDB ({total} total rows).
           </p>
@@ -99,7 +99,7 @@ export default function RecordsTable({ jobId }) {
         </div>
       ) : records.length === 0 ? (
         <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-dim)' }}>
-          No anonymized records match the specified query.
+          No pseudonymized records match the specified query.
         </div>
       ) : (
         <div className="table-container">

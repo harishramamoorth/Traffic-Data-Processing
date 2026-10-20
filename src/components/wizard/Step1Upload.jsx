@@ -1,10 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   UploadCloud,
   FileSpreadsheet,
-  Sparkles,
+  Database,
+  Play,
+  Scale,
   ShieldCheck,
   AlertCircle,
   ArrowRight,
@@ -18,9 +20,18 @@ import {
 import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { useToast } from '../Toast';
 import axios from 'axios';
+import PageLoader from '../PageLoader';
 
 const MAX_SIZE_MB = 50;
 const MAX_BYTES = MAX_SIZE_MB * 1024 * 1024;
+
+const PROFILING_STEPS = [
+  { label: 'INGESTING · TELEMETRY DATASET', pct: 15 },
+  { label: 'PARSING · SCHEMA & ATTRIBUTES', pct: 35 },
+  { label: 'SCANNING · PII & IDENTIFIERS', pct: 60 },
+  { label: 'CALCULATING · RISK & K-ANONYMITY', pct: 82 },
+  { label: 'PREPARING · ANALYSIS GATEWAY', pct: 100 },
+];
 
 const TOUR_STEPS = [
   {
@@ -51,6 +62,9 @@ export default function Step1Upload() {
   const [loading, setLoading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [uploadError, setUploadError] = useState(null); // { message, file, isSample }
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const pendingProfileRef = useRef(null);
+  const loaderDoneRef = useRef(false);
 
   // Guided intro (3-4 tooltips) on first visit (Item 19)
   const [showTour, setShowTour] = useState(() => {
@@ -69,9 +83,34 @@ export default function Step1Upload() {
     } catch {}
   };
 
-  const profileFile = async (selectedFile, isSample = false) => {
+  const finishProfiling = useCallback((pendingData) => {
+    const data = pendingData || pendingProfileRef.current;
+    if (!data?.profile) return;
+    setProfileData(data.profile);
+    addToast({
+      type: 'success',
+      title: data.isSample ? 'Sample Dataset Loaded' : 'Dataset Profiled',
+      message: data.isSample ? 'Loaded built-in 527-record sample traffic dataset.' : `Dataset '${data.fileName || 'file'}' profiled successfully.`
+    });
+    setStep(2);
+    setIsAnalyzing(false);
+    setIsProfiling(false);
+    setLoading(false);
+  }, [addToast, setProfileData, setIsProfiling, setStep]);
+
+  const handleLoaderComplete = useCallback(() => {
+    loaderDoneRef.current = true;
+    if (pendingProfileRef.current) {
+      finishProfiling(pendingProfileRef.current);
+    }
+  }, [finishProfiling]);
+
+  const profileFile = async (selectedFile, isSample = false, targetSheet = null) => {
     setLoading(true);
     setIsProfiling(true);
+    setIsAnalyzing(true);
+    pendingProfileRef.current = null;
+    loaderDoneRef.current = false;
     setUploadPercent(10);
     setUploadError(null);
 
@@ -80,6 +119,9 @@ export default function Step1Upload() {
       formData.append('sample', 'true');
     } else if (selectedFile) {
       formData.append('file', selectedFile);
+    }
+    if (targetSheet) {
+      formData.append('sheet', targetSheet);
     }
 
     try {
@@ -98,14 +140,12 @@ export default function Step1Upload() {
 
       setUploadPercent(100);
       if (res.data?.profile) {
-        setProfileData(res.data.profile);
-        addToast({
-          type: 'success',
-          title: isSample ? 'Sample Dataset Loaded' : 'Dataset Profiled',
-          message: isSample ? 'Loaded built-in 527-record sample traffic dataset.' : `Dataset '${selectedFile.name}' profiled successfully.`
-        });
-        // Move to Step 2 (File Analysis)
-        setStep(2);
+        const payload = {
+          profile: res.data.profile,
+          isSample,
+          fileName: selectedFile?.name
+        };
+        finishProfiling(payload);
       } else {
         throw new Error('No profile data returned from server');
       }
@@ -129,7 +169,7 @@ export default function Step1Upload() {
       });
       setFile(null, false);
       setIsProfiling(false);
-    } finally {
+      setIsAnalyzing(false);
       setLoading(false);
     }
   };
@@ -139,7 +179,7 @@ export default function Step1Upload() {
       setUploadError(null);
       if (rejectedFiles && rejectedFiles.length > 0) {
         const rej = rejectedFiles[0];
-        let errMsg = 'Invalid file format. Please upload a .csv or .json dataset.';
+        let errMsg = 'Invalid file format. Please upload a .csv, .tsv, .txt, .json, .xlsx, or .xls dataset.';
         if (rej.size > MAX_BYTES) {
           errMsg = `File exceeds ${MAX_SIZE_MB}MB limit.`;
         }
@@ -166,22 +206,39 @@ export default function Step1Upload() {
     onDrop,
     accept: {
       'text/csv': ['.csv'],
+      'text/tab-separated-values': ['.tsv'],
+      'text/plain': ['.csv', '.tsv', '.txt', '.json'],
       'application/json': ['.json'],
-      'text/plain': ['.csv', '.json']
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls', '.xlsx']
     },
     maxSize: MAX_BYTES,
     multiple: false,
     disabled: loading
   });
 
+  if (isAnalyzing) {
+    return (
+      <PageLoader
+        variant="hud"
+        title="Analyzing"
+        titleAccent="Dataset"
+        subtitle="SCANNING PII · PROFILING TELEMETRY"
+        steps={PROFILING_STEPS}
+        duration={1200}
+        onComplete={handleLoaderComplete}
+      />
+    );
+  }
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
-      {/* Title & Privacy Guarantee Header */}
+      {/* Title & Privacy Header */}
       <div className="text-center space-y-2 relative">
         <div className="flex items-center justify-center gap-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium">
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-            <span>Zero-Storage Pre-Flight Guarantee</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-theme-card border border-theme-border text-theme-dim text-xs font-medium shadow-sm">
+            <ShieldCheck className="w-4 h-4 text-indigo-500" />
+            <span>Pre-Flight Privacy Verification</span>
           </div>
 
           <button
@@ -190,10 +247,10 @@ export default function Step1Upload() {
               setTourIndex(0);
               setShowTour(true);
             }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-theme-secondary border border-theme-border text-[11px] text-theme-muted hover:text-cyan-400 transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-theme-card border border-theme-border text-[11px] text-theme-muted hover:text-theme-text shadow-sm transition-colors cursor-pointer"
             title="Open guided tour instructions"
           >
-            <HelpCircle className="w-3.5 h-3.5" />
+            <HelpCircle className="w-3.5 h-3.5 text-indigo-500" />
             <span>Quick Tour</span>
           </button>
         </div>
@@ -201,26 +258,26 @@ export default function Step1Upload() {
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-theme-text">
           Upload Road Traffic Telemetry Dataset
         </h2>
-        <p className="text-sm text-theme-muted max-w-xl mx-auto">
+        <p className="text-xs sm:text-sm text-theme-muted max-w-xl mx-auto">
           Files are profiled entirely in-memory to detect schema, PII, and anomalies. No raw records are stored to disk or MongoDB.
         </p>
       </div>
 
-      {/* Guided Intro Banner (3-4 Tooltips on first visit, Item 19) */}
+      {/* Guided Intro Banner */}
       <AnimatePresence>
         {showTour && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg shadow-cyan-500/5"
+            className="p-4 rounded-xl bg-theme-card border border-theme-border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
           >
             <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold font-mono shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold font-mono text-xs shrink-0">
                 {tourIndex + 1}
               </div>
               <div className="space-y-0.5">
-                <span className="text-xs font-bold text-cyan-300">
+                <span className="text-xs font-bold text-theme-text">
                   {TOUR_STEPS[tourIndex].title}
                 </span>
                 <p className="text-xs text-theme-muted leading-relaxed">
@@ -234,7 +291,7 @@ export default function Step1Upload() {
                 <button
                   type="button"
                   onClick={() => setTourIndex((i) => Math.max(0, i - 1))}
-                  className="p-1.5 rounded-lg bg-theme-secondary border border-theme-border text-xs text-theme-muted hover:text-white"
+                  className="p-1.5 rounded-lg bg-theme-secondary border border-theme-border text-xs text-theme-muted hover:text-theme-text cursor-pointer"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
@@ -244,7 +301,7 @@ export default function Step1Upload() {
                 <button
                   type="button"
                   onClick={() => setTourIndex((i) => Math.min(TOUR_STEPS.length - 1, i + 1))}
-                  className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/30 flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
                 >
                   <span>Next</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -253,7 +310,7 @@ export default function Step1Upload() {
                 <button
                   type="button"
                   onClick={dismissTour}
-                  className="px-3 py-1.5 rounded-lg bg-cyan-500 text-black text-xs font-bold hover:bg-cyan-400"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
                 >
                   Got It
                 </button>
@@ -262,7 +319,7 @@ export default function Step1Upload() {
               <button
                 type="button"
                 onClick={dismissTour}
-                className="p-1.5 rounded-lg text-theme-dim hover:text-theme-muted"
+                className="p-1.5 rounded-lg text-theme-dim hover:text-theme-muted cursor-pointer"
                 title="Dismiss tour"
               >
                 <X className="w-3.5 h-3.5" />
@@ -313,152 +370,167 @@ export default function Step1Upload() {
         </div>
       )}
 
-      {/* Drag & Drop Zone */}
-      <motion.div
-        whileHover={{ scale: loading ? 1 : 1.005 }}
-        transition={{ duration: 0.2 }}
-        className="relative"
-      >
-        <div
-          {...getRootProps()}
-          className={`relative overflow-hidden cursor-pointer rounded-2xl border-2 border-dashed p-10 sm:p-14 text-center transition-all duration-300 ${
-            isDragActive && !isDragReject
-              ? 'border-cyan-400 bg-cyan-500/10 scale-[1.01]'
-              : isDragReject
-              ? 'border-rose-500 bg-rose-500/10'
-              : 'border-theme-border bg-theme-card/70 hover:border-cyan-500/50 hover:bg-theme-card/90'
-          }`}
-        >
-          <input {...getInputProps()} />
+      {/* Dual Ingestion Hub: Custom Upload + Instant Sandbox */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+        {/* Left: Custom Dataset Dropzone (8 cols) */}
+        <div className="lg:col-span-8">
+          <motion.div
+            whileHover={{ scale: loading ? 1 : 1.002 }}
+            transition={{ duration: 0.2 }}
+            className="h-full"
+          >
+            <div
+              {...getRootProps()}
+              className={`h-full min-h-[240px] flex flex-col items-center justify-center relative overflow-hidden cursor-pointer rounded-2xl border-2 border-dashed p-6 sm:p-8 text-center transition-all shadow-sm ${
+                isDragActive && !isDragReject
+                  ? 'border-theme-accent bg-theme-accent/10 shadow-theme-glow'
+                  : isDragReject
+                  ? 'border-rose-500 bg-rose-50/10'
+                  : 'border-theme-border bg-theme-card hover:border-theme-accent/60 hover:bg-theme-secondary/40'
+              }`}
+            >
+              <input {...getInputProps()} />
 
-          {/* Animated Glow Effect */}
-          <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/5 via-transparent to-transparent pointer-events-none" />
+              {loading ? (
+                <div className="flex flex-col items-center justify-center space-y-4">
+                  {/* Progress Ring */}
+                  <div className="relative w-16 h-16 flex items-center justify-center">
+                    <svg className="w-full h-full -rotate-90">
+                      <circle
+                        cx="32"
+                        cy="32"
+                        r="28"
+                        stroke="currentColor"
+                        strokeWidth="5"
+                        className="text-theme-border"
+                        fill="transparent"
+                      />
+                      <circle
+                        cx="32"
+                        cy="32"
+                        r="28"
+                        stroke="currentColor"
+                        strokeWidth="5"
+                        className="text-theme-accent transition-all duration-300"
+                        fill="transparent"
+                        strokeDasharray={176}
+                        strokeDashoffset={176 - (176 * uploadPercent) / 100}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span className="absolute font-mono text-xs font-bold text-theme-accent">
+                      {uploadPercent}%
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-theme-text animate-pulse">
+                      Analyzing dataset in memory...
+                    </p>
+                    <p className="text-xs text-theme-muted">
+                      Generating pre-flight audit and PII risk assessment
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-theme-secondary border border-theme-border flex items-center justify-center text-theme-accent shadow-sm">
+                    <UploadCloud className="w-6 h-6" />
+                  </div>
 
-          {loading ? (
-            <div className="flex flex-col items-center justify-center space-y-4">
-              {/* Progress Ring */}
-              <div className="relative w-20 h-20 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90">
-                  <circle
-                    cx="40"
-                    cy="40"
-                    r="34"
-                    stroke="currentColor"
-                    strokeWidth="6"
-                    className="text-theme-border"
-                    fill="transparent"
-                  />
-                  <circle
-                    cx="40"
-                    cy="40"
-                    r="34"
-                    stroke="currentColor"
-                    strokeWidth="6"
-                    className="text-cyan-400 transition-all duration-300"
-                    fill="transparent"
-                    strokeDasharray={213}
-                    strokeDashoffset={213 - (213 * uploadPercent) / 100}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span className="absolute font-mono text-sm font-bold text-cyan-300">
-                  {uploadPercent}%
-                </span>
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-theme-text animate-pulse">
-                  Analyzing dataset in memory...
-                </p>
-                <p className="text-xs text-theme-muted">
-                  Generating pre-flight audit and PII risk assessment
-                </p>
-              </div>
+                  <div className="space-y-1">
+                    <p className="text-sm sm:text-base font-semibold text-theme-text">
+                      Drop your dataset here, or{' '}
+                      <span className="text-theme-accent font-bold underline underline-offset-4 hover:opacity-80">browse</span>
+                    </p>
+                    <p className="text-xs text-theme-muted max-w-md mx-auto">
+                      Multi-format ingestion: CSV, TSV, TXT, JSON, Excel (.xlsx, .xls) up to 50MB
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                    {['.CSV', '.TSV', '.TXT', '.XLSX', '.JSON'].map((ext) => (
+                      <span key={ext} className="px-2 py-0.5 rounded-md bg-theme-secondary text-[10px] font-mono font-medium text-theme-text border border-theme-border">
+                        {ext}
+                      </span>
+                    ))}
+                    <span className="text-[10px] text-theme-dim ml-1">· Ephemeral RAM staging</span>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                <UploadCloud className="w-8 h-8" />
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-base font-semibold text-theme-text">
-                  Drop your CSV or JSON dataset here, or{' '}
-                  <span className="text-cyan-400 underline underline-offset-4">browse</span>
-                </p>
-                <p className="text-xs text-theme-muted">
-                  Supports up to 50MB files (e.g. coordinates, timestamps, vehicle plates, speeds)
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-theme-secondary text-[11px] font-mono text-theme-muted border border-theme-border">
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400" />
-                  .CSV
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-theme-secondary text-[11px] font-mono text-theme-muted border border-theme-border">
-                  <span className="font-bold text-blue-400">&#123;&#125;</span>
-                  .JSON
-                </span>
-                <span className="text-xs text-theme-dim">•</span>
-                <span className="text-xs text-theme-muted">Max 50MB</span>
-              </div>
-            </div>
-          )}
+          </motion.div>
         </div>
-      </motion.div>
 
-      {/* Load Sample Dataset Button (Item 21) */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => profileFile(null, true)}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-theme-card to-theme-secondary hover:border-cyan-500/60 border border-theme-border text-cyan-400 hover:text-cyan-300 font-bold text-xs transition-all shadow-lg hover:shadow-cyan-500/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group"
-          title={loading ? "Analyzing dataset..." : "Loads pre-packaged 527-record sample traffic telemetry dataset"}
-        >
-          <Sparkles className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
-          <span>Load Sample Dataset (527 Records)</span>
-        </button>
-        <span className="text-xs text-theme-dim">
-          Instant demo with real plates, GPS coordinates, timestamps & speeds
-        </span>
+        {/* Right: Instant Sandbox / Sample Dataset (4 cols) */}
+        <div className="lg:col-span-4 flex flex-col justify-between p-5 rounded-2xl bg-theme-card border border-theme-border shadow-sm">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-theme-dim font-bold">
+                Quickstart Sandbox
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 text-[10px] font-mono font-bold">
+                Ready to Run
+              </span>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-theme-text flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-theme-accent" />
+                NYC Traffic Telemetry
+              </h3>
+              <p className="text-xs text-theme-muted mt-1 leading-relaxed">
+                Test the full pipeline instantly with 527 real vehicle records containing license plates, GPS coordinates, timestamps, and speeds.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono pt-1">
+              <div className="px-2.5 py-1.5 rounded-lg bg-theme-secondary/70 border border-theme-border">
+                <span className="block text-[10px] text-theme-dim uppercase">Records</span>
+                <span className="font-bold text-theme-text">527 Rows</span>
+              </div>
+              <div className="px-2.5 py-1.5 rounded-lg bg-theme-secondary/70 border border-theme-border">
+                <span className="block text-[10px] text-theme-dim uppercase">Columns</span>
+                <span className="font-bold text-theme-text">8 Features</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-4">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => profileFile(null, true)}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-theme-accent text-black font-bold text-xs shadow-theme-glow hover:opacity-90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Load Sample Dataset (527 Rows)</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Real-World Data Telemetry Guidelines & Security Guarantee */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-5 rounded-2xl bg-theme-card/60 border border-theme-border">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 mt-0.5">
-            <CheckCircle2 className="w-4 h-4" />
-          </div>
+      {/* Sleek Enterprise Security & Compliance Ribbon */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-theme-secondary/50 border border-theme-border text-xs">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
           <div>
-            <h4 className="text-xs font-bold text-theme-text">Adaptive Schema Detection</h4>
-            <p className="text-[11px] text-theme-dim mt-0.5 leading-relaxed">
-              Auto-detects vehicle plates, timestamps, GPS coordinates, speed, and comments across any CSV or JSON.
-            </p>
+            <span className="font-bold text-theme-text">Zero Data Retention</span>
+            <p className="text-[10px] text-theme-dim">Files purged from RAM immediately post-processing</p>
           </div>
         </div>
-
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
-            <ShieldCheck className="w-4 h-4" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <CheckCircle2 className="w-4 h-4 text-theme-accent shrink-0" />
           <div>
-            <h4 className="text-xs font-bold text-theme-text">Zero Raw Retention</h4>
-            <p className="text-[11px] text-theme-dim mt-0.5 leading-relaxed">
-              Uploaded files are held temporarily in memory and scrubbed immediately from RAM and disk after profiling.
-            </p>
+            <span className="font-bold text-theme-text">Auto-Schema Profiling</span>
+            <p className="text-[10px] text-theme-dim">Detects plates, GPS coordinates, timestamps, and speeds</p>
           </div>
         </div>
-
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0 mt-0.5">
-            <Sparkles className="w-4 h-4" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <Scale className="w-4 h-4 text-emerald-500 shrink-0" />
           <div>
-            <h4 className="text-xs font-bold text-theme-text">QC-01 Reconciliation</h4>
-            <p className="text-[11px] text-theme-dim mt-0.5 leading-relaxed">
-              Every single dropped or transformed record is audited with an exact reason so zero data is lost silently.
-            </p>
+            <span className="font-bold text-theme-text">QC-01 Reconciliation</span>
+            <p className="text-[10px] text-theme-dim">100% mathematical audit: output + dropped = input</p>
           </div>
         </div>
       </div>

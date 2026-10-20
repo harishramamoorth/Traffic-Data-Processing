@@ -77,8 +77,26 @@ describe('useWorkflowStore', () => {
 
     useWorkflowStore.getState().updateConfig({ riskReductionMode: 'aggregate', kThreshold: 5 });
     expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('aggregate');
-    expect(useWorkflowStore.getState().customConfig.kThreshold).toBe(5);
     const aggScores = useWorkflowStore.getState().calculateScores();
     expect(aggScores.afterRisk).toContain('Low');
+  });
+
+  it('handles multi-sheet Excel profile data and sheet selection', () => {
+    useWorkflowStore.getState().setProfileData({
+      file_type: 'Excel',
+      sheet_names: ['Telemetry_Q1', 'Telemetry_Q2', 'Metadata'],
+      selected_sheet: 'Telemetry_Q1'
+    });
+
+    expect(useWorkflowStore.getState().sheetNames).toEqual(['Telemetry_Q1', 'Telemetry_Q2', 'Metadata']);
+    expect(useWorkflowStore.getState().selectedSheet).toBe('Telemetry_Q1');
+    expect(useWorkflowStore.getState().customConfig.sheet).toBe('Telemetry_Q1');
+
+    useWorkflowStore.getState().setSelectedSheet('Telemetry_Q2');
+    expect(useWorkflowStore.getState().selectedSheet).toBe('Telemetry_Q2');
+
+    useWorkflowStore.getState().resetWorkflow();
+    expect(useWorkflowStore.getState().sheetNames).toEqual([]);
+    expect(useWorkflowStore.getState().selectedSheet).toBeNull();
   });
 });

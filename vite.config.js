@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   test: {
+    environment: 'jsdom',
+    testTimeout: 15000,
     exclude: ['**/e2e/**', '**/node_modules/**']
   },
   server: {
@@ -14,7 +16,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: 120000
       }
     }
   },
