@@ -13,28 +13,27 @@ const storage = multer.diskStorage({
   }
 });
 
-const ALLOWED_EXTENSIONS = ['.csv', '.json'];
+const ALLOWED_EXTENSIONS = ['.csv', '.tsv', '.txt', '.json', '.xlsx', '.xls'];
 const ALLOWED_MIMES = [
   'text/csv',
-  'application/json',
+  'text/tab-separated-values',
   'text/plain',
+  'application/json',
   'application/vnd.ms-excel',
-  'application/octet-stream'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream',
+  'application/x-zip-compressed'
 ];
 
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const isExtValid = ALLOWED_EXTENSIONS.includes(ext);
-  const isMimeValid = ALLOWED_MIMES.includes(file.mimetype);
 
-  if (isExtValid && isMimeValid) {
+  if (isExtValid) {
     cb(null, true);
   } else {
-    cb(
-      new Error(
-        `Invalid upload file format. Expected a .csv or .json file (received ext: '${ext}', mime: '${file.mimetype}').`
-      )
-    );
+    req.fileValidationError = `Invalid upload file format. Expected a .csv, .tsv, .txt, .json, .xlsx, or .xls file (received ext: '${ext}').`;
+    cb(null, false);
   }
 };
 

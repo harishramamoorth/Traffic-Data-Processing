@@ -13,10 +13,13 @@ import {
   Square,
   GitCompare,
   PlusCircle,
-  X
+  X,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
-import PageLoader from '../components/PageLoader';
 import axios from 'axios';
 
 export default function Jobs() {
@@ -48,7 +51,6 @@ export default function Jobs() {
       });
       if (res.data?.success) {
         let list = res.data.jobs || [];
-        // Sort client side
         list.sort((a, b) => {
           let valA = a[sortField] || '';
           let valB = b[sortField] || '';
@@ -65,7 +67,7 @@ export default function Jobs() {
         setTotalPages(res.data.totalPages || 1);
       }
     } catch (err) {
-      addToast('Failed to load jobs repository', 'error');
+      addToast('Failed to load jobs', 'error');
     } finally {
       setLoading(false);
     }
@@ -78,10 +80,10 @@ export default function Jobs() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm(`Are you sure you want to permanently delete job ${id}?`)) return;
+    if (!window.confirm(`Delete job ${id}?`)) return;
     try {
       await axios.delete(`/api/jobs/${id}`);
-      addToast(`Job ${id} deleted successfully.`, 'success');
+      addToast(`Job ${id} deleted.`, 'success');
       loadJobs();
     } catch (err) {
       addToast('Failed to delete job', 'error');
@@ -101,40 +103,43 @@ export default function Jobs() {
   };
 
   return (
-    <div className="space-y-8 pb-16">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-6 rounded-2xl bg-theme-card border border-theme-border shadow-xl">
+    <div className="space-y-6 pb-16">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 sm:p-6 rounded-xl bg-theme-card border border-theme-border">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-theme-text">Jobs Repository</h1>
-          <p className="text-xs sm:text-sm text-theme-dim mt-1">
-            Search, filter, inspect, and compare historical traffic anonymization executions.
+          <div className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-indigo-500" />
+            <h1 className="text-xl sm:text-2xl font-bold text-theme-text tracking-tight">Jobs</h1>
+          </div>
+          <p className="text-xs text-theme-muted mt-1">
+            Browse and inspect historical dataset privacy runs.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {selectedForCompare.length === 2 && (
             <button
               type="button"
               onClick={() => setIsComparing(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-500/20 transition-all"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer"
             >
-              <GitCompare className="w-4 h-4" />
-              <span>Compare Selected (2)</span>
+              <GitCompare className="w-3.5 h-3.5" />
+              <span>Compare (2)</span>
             </button>
           )}
 
           <Link
             to="/"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors shadow-sm"
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-3.5 h-3.5" />
             <span>New Job</span>
           </Link>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="p-4 rounded-2xl bg-theme-card border border-theme-border flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="p-4 rounded-xl bg-theme-card border border-theme-border flex flex-col md:flex-row items-center justify-between gap-3">
         <form onSubmit={handleSearchSubmit} className="flex-1 w-full flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-theme-dim absolute left-3 top-1/2 -translate-y-1/2" />
@@ -142,29 +147,29 @@ export default function Jobs() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by dataset filename or job ID..."
-              className="w-full pl-9 pr-4 py-2 rounded-xl bg-theme-secondary border border-theme-border text-xs text-theme-text placeholder-theme-dim focus:outline-none focus:border-cyan-400"
+              placeholder="Search filename or ID..."
+              className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-theme-secondary/40 border border-theme-border text-xs text-theme-text placeholder-theme-dim focus:outline-none focus:border-indigo-500"
             />
           </div>
           <button
             type="submit"
-            className="px-4 py-2 rounded-xl bg-theme-secondary text-xs font-semibold text-theme-text border border-theme-border hover:bg-theme-border transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-theme-secondary/60 text-xs font-medium text-theme-text border border-theme-border hover:bg-theme-secondary transition-colors cursor-pointer"
           >
             Search
           </button>
         </form>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex items-center gap-2.5 w-full md:w-auto">
           {/* Status Filter */}
-          <div className="flex items-center gap-2 text-xs">
-            <Filter className="w-4 h-4 text-theme-dim" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <Filter className="w-3.5 h-3.5 text-theme-dim" />
             <select
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-3 py-2 rounded-xl bg-theme-secondary border border-theme-border text-xs text-theme-text focus:outline-none focus:border-cyan-400 font-mono"
+              className="px-2.5 py-1.5 rounded-lg bg-theme-secondary/40 border border-theme-border text-xs text-theme-text focus:outline-none focus:border-indigo-500"
             >
               <option value="ALL">All Statuses</option>
               <option value="COMPLETED">Completed</option>
@@ -174,12 +179,12 @@ export default function Jobs() {
           </div>
 
           {/* Sort Field */}
-          <div className="flex items-center gap-2 text-xs">
-            <ArrowUpDown className="w-4 h-4 text-theme-dim" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-theme-dim" />
             <select
               value={sortField}
               onChange={(e) => setSortField(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-theme-secondary border border-theme-border text-xs text-theme-text focus:outline-none focus:border-cyan-400 font-mono"
+              className="px-2.5 py-1.5 rounded-lg bg-theme-secondary/40 border border-theme-border text-xs text-theme-text focus:outline-none focus:border-indigo-500"
             >
               <option value="createdAt">Date Created</option>
               <option value="originalFilename">Filename</option>
@@ -190,83 +195,109 @@ export default function Jobs() {
       </div>
 
       {/* Jobs Table */}
-      <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
+      <div className="p-5 rounded-xl bg-theme-card border border-theme-border space-y-4">
         {loading ? (
-          <PageLoader
-            variant="card"
-            title="Querying Jobs Repository"
-            subtitle="Retrieving historical pipeline executions from MongoDB..."
-            steps={[
-              'Connecting to jobs collection...',
-              'Loading privacy profiles and runtime metrics...',
-              'Formatting audit records...'
-            ]}
-          />
+          <div className="py-16 flex flex-col items-center justify-center space-y-2">
+            <div className="w-6 h-6 rounded-full border-2 border-theme-border border-t-indigo-500 animate-spin" />
+            <span className="text-xs text-theme-dim">Loading jobs...</span>
+          </div>
         ) : jobs.length === 0 ? (
-          <div className="text-center py-14 space-y-3">
+          <div className="text-center py-12 space-y-3">
+            <FileSpreadsheet className="w-8 h-8 text-theme-dim/30 mx-auto" />
             <p className="text-xs text-theme-muted">No jobs matching your filter criteria.</p>
-            <Link to="/" className="inline-block px-4 py-2 rounded-xl bg-cyan-500 text-black text-xs font-bold">
+            <Link
+              to="/"
+              className="inline-block px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+            >
               Run New Job
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-left text-xs min-w-[620px]">
               <thead>
-                <tr className="border-b border-theme-border text-theme-dim uppercase text-[10px]">
-                  <th className="pb-3 w-8">Compare</th>
-                  <th className="pb-3 font-semibold">Job ID</th>
-                  <th className="pb-3 font-semibold">Dataset Filename</th>
-                  <th className="pb-3 font-semibold">Execution Status</th>
-                  <th className="pb-3 font-semibold">Rows In / Out</th>
-                  <th className="pb-3 font-semibold">PII Handled</th>
-                  <th className="pb-3 font-semibold">Processed At</th>
-                  <th className="pb-3 font-semibold text-right">Actions</th>
+                <tr className="border-b border-theme-border text-theme-dim uppercase text-[10px] tracking-wider">
+                  <th className="pb-2.5 w-8"></th>
+                  <th className="pb-2.5 font-medium">Dataset</th>
+                  <th className="pb-2.5 font-medium">Status</th>
+                  <th className="pb-2.5 font-medium">Risk</th>
+                  <th className="pb-2.5 font-medium">Rows In &rarr; Out</th>
+                  <th className="pb-2.5 font-medium">Date</th>
+                  <th className="pb-2.5 font-medium text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-theme-border/50">
+              <tbody className="divide-y divide-theme-border/40">
                 {jobs.map((job) => {
                   const isChecked = selectedForCompare.some((j) => j.id === job.id);
+                  const isPass = job.status === 'COMPLETED' || job.status === 'PASSED';
+                  const isWarn = job.status === 'PASSED_WITH_WARNINGS';
+                  const risk = String(
+                    job.summary?.re_identification_risk ||
+                    job.kAnonymity?.risk_level ||
+                    job.kAnonymity?.risk_badge ||
+                    'N/A'
+                  ).toUpperCase();
+
                   return (
-                    <tr key={job.id} className="hover:bg-theme-secondary/40 transition-colors">
-                      <td className="py-3">
+                    <tr key={job.id} className="hover:bg-theme-secondary/20 transition-colors">
+                      <td className="py-2.5">
                         <button
                           type="button"
                           onClick={() => toggleSelectCompare(job)}
-                          className="text-theme-muted hover:text-cyan-400"
+                          className="text-theme-muted hover:text-indigo-500 transition-colors cursor-pointer"
                         >
                           {isChecked ? (
-                            <CheckSquare className="w-4 h-4 text-cyan-400" />
+                            <CheckSquare className="w-4 h-4 text-indigo-500" />
                           ) : (
                             <Square className="w-4 h-4" />
                           )}
                         </button>
                       </td>
-                      <td className="py-3 font-bold text-theme-text">{job.id}</td>
-                      <td className="py-3 text-theme-muted truncate max-w-xs">{job.originalFilename}</td>
-                      <td className="py-3">
+                      <td className="py-2.5 pr-3">
+                        <div className="font-medium text-theme-text truncate max-w-[180px]" title={job.originalFilename}>
+                          {job.originalFilename || 'Dataset'}
+                        </div>
+                        <span className="text-[10px] text-theme-dim font-mono">{job.id}</span>
+                      </td>
+                      <td className="py-2.5 pr-3">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            job.status === 'COMPLETED'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : 'bg-rose-500/20 text-rose-300'
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            isPass
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                              : isWarn
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                              : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
                           }`}
                         >
-                          {job.status}
+                          {isPass ? <CheckCircle2 className="w-3 h-3" /> : isWarn ? <AlertTriangle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          {isPass ? 'Passed' : isWarn ? 'Warnings' : 'Failed'}
                         </span>
                       </td>
-                      <td className="py-3 text-theme-dim">
-                        {job.summary?.original_rows ?? 0} &rarr; {job.summary?.processed_rows ?? 0}
+                      <td className="py-2.5 pr-3">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            risk === 'LOW'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                              : risk === 'MEDIUM'
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                              : risk === 'HIGH'
+                              ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                              : 'bg-theme-secondary text-theme-muted'
+                          }`}
+                        >
+                          {risk}
+                        </span>
                       </td>
-                      <td className="py-3 text-purple-300">{job.summary?.pii_columns_detected ?? 0} cols</td>
-                      <td className="py-3 text-theme-dim">
-                        {new Date(job.createdAt).toLocaleDateString()}{' '}
-                        {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <td className="py-2.5 pr-3 font-mono text-theme-dim whitespace-nowrap">
+                        {job.summary?.original_rows ?? 0} &rarr; <span className="text-indigo-500 font-semibold">{job.summary?.processed_rows ?? 0}</span>
                       </td>
-                      <td className="py-3 text-right space-x-2">
+                      <td className="py-2.5 pr-3 text-theme-dim whitespace-nowrap">
+                        {new Date(job.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="py-2.5 text-right space-x-1.5 whitespace-nowrap">
                         <Link
                           to={`/jobs/${job.id}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-theme-secondary text-cyan-300 border border-theme-border hover:bg-theme-border text-[11px]"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-theme-border text-[11px] text-theme-muted hover:text-theme-text transition-colors"
                         >
                           <span>Inspect</span>
                           <ExternalLink className="w-3 h-3" />
@@ -274,10 +305,10 @@ export default function Jobs() {
                         <button
                           type="button"
                           onClick={() => handleDelete(job.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 text-[11px]"
+                          className="inline-flex items-center p-1 rounded-md border border-theme-border text-theme-dim hover:text-rose-500 hover:border-rose-500/30 transition-colors cursor-pointer"
                           title="Delete Job"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>
@@ -289,27 +320,27 @@ export default function Jobs() {
         )}
 
         {/* Pagination Controls */}
-        <div className="flex items-center justify-between pt-4 border-t border-theme-border/60 text-xs font-mono text-theme-muted">
+        <div className="flex items-center justify-between pt-3 border-t border-theme-border text-xs text-theme-dim">
           <span>
-            Showing page {page} of {totalPages} ({total} total jobs)
+            Page {page} of {totalPages} ({total} jobs)
           </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={page <= 1 || loading}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="p-2 rounded-lg bg-theme-secondary border border-theme-border disabled:opacity-40"
+              className="p-1.5 rounded-md border border-theme-border hover:bg-theme-secondary disabled:opacity-40 transition-colors cursor-pointer"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
               disabled={page >= totalPages || loading}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="p-2 rounded-lg bg-theme-secondary border border-theme-border disabled:opacity-40"
+              className="p-1.5 rounded-md border border-theme-border hover:bg-theme-secondary disabled:opacity-40 transition-colors cursor-pointer"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -317,41 +348,43 @@ export default function Jobs() {
 
       {/* Compare Modal Drawer */}
       {isComparing && selectedForCompare.length === 2 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-4xl p-6 rounded-2xl bg-theme-card border border-theme-border shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-3xl p-5 rounded-xl bg-theme-card border border-theme-border shadow-xl space-y-5 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-theme-border pb-3">
-              <h3 className="text-base font-bold text-theme-text flex items-center gap-2">
-                <GitCompare className="w-5 h-5 text-purple-400" />
-                <span>Job Comparison: {selectedForCompare[0].id} vs {selectedForCompare[1].id}</span>
+              <h3 className="text-sm font-semibold text-theme-text flex items-center gap-2">
+                <GitCompare className="w-4 h-4 text-indigo-500" />
+                <span>Job Comparison</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setIsComparing(false)}
-                className="p-1 rounded-lg hover:bg-theme-secondary text-theme-dim hover:text-theme-text"
+                className="p-1 rounded-md hover:bg-theme-secondary text-theme-dim hover:text-theme-text transition-colors cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {selectedForCompare.map((job, idx) => (
-                <div key={job.id} className="p-4 rounded-xl bg-theme-secondary/40 border border-theme-border space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {selectedForCompare.map((job) => (
+                <div key={job.id} className="p-3.5 rounded-lg bg-theme-secondary/30 border border-theme-border space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-cyan-400">{job.id}</span>
+                    <span className="font-mono text-xs font-semibold text-theme-text">{job.id}</span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        job.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        job.status === 'COMPLETED'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
                       }`}
                     >
                       {job.status}
                     </span>
                   </div>
-                  <div className="text-xs space-y-1.5 font-mono">
-                    <div className="text-theme-muted">File: {job.originalFilename}</div>
-                    <div className="text-theme-muted">In / Out: {job.summary?.original_rows} &rarr; {job.summary?.processed_rows}</div>
-                    <div className="text-theme-muted">Rejected: {job.summary?.rejected_rows_count ?? 0} rows</div>
-                    <div className="text-theme-muted">PII Detected: {job.summary?.pii_columns_detected ?? 0} columns</div>
-                    <div className="text-emerald-400 font-semibold">Checks: {job.summary?.quality_checks_passed}</div>
+                  <div className="text-xs space-y-1 font-mono text-theme-muted">
+                    <div>File: <span className="text-theme-text">{job.originalFilename}</span></div>
+                    <div>Rows: {job.summary?.original_rows} &rarr; <span className="text-indigo-500">{job.summary?.processed_rows}</span></div>
+                    <div>Rejected: {job.summary?.rejected_rows_count ?? 0}</div>
+                    <div>PII Columns: {job.summary?.pii_columns_detected ?? 0}</div>
+                    <div>Checks: {job.summary?.quality_checks_passed}</div>
                   </div>
                 </div>
               ))}
@@ -361,9 +394,9 @@ export default function Jobs() {
               <button
                 type="button"
                 onClick={() => setIsComparing(false)}
-                className="px-5 py-2 rounded-xl bg-theme-secondary text-xs font-semibold text-theme-text border border-theme-border"
+                className="px-4 py-1.5 rounded-lg bg-theme-secondary text-xs font-medium text-theme-text border border-theme-border hover:bg-theme-secondary/80 transition-colors cursor-pointer"
               >
-                Close Comparison
+                Close
               </button>
             </div>
           </div>
@@ -372,3 +405,4 @@ export default function Jobs() {
     </div>
   );
 }
+

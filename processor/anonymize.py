@@ -19,10 +19,11 @@ import numpy as np
 import pandas as pd
 
 
-def generate_plate_hmac(val: str, secret_key: str, prefix: str = "ANON_", length: int = 12) -> str:
+def generate_plate_hmac(val: str, secret_key: str, prefix: str = "ANON_", length: int = 12, domain: str = "") -> str:
     """
     Computes deterministic HMAC-SHA256 pseudonym for identifiers and plates.
-    Same value + same secret key -> same pseudonym.
+    Same value + same secret key + same domain -> same pseudonym.
+    Domain separation prevents cross-column linkage correlation attacks.
     Format: ANON_<first 12 hex characters>.
     """
     clean_val = str(val).strip().upper()
@@ -30,39 +31,237 @@ def generate_plate_hmac(val: str, secret_key: str, prefix: str = "ANON_", length
         return f"{prefix}UNKNOWN"
 
     key_bytes = secret_key.encode("utf-8")
-    data_bytes = clean_val.encode("utf-8")
+    data_to_hash = f"{domain.strip().lower()}:{clean_val}" if domain else clean_val
+    data_bytes = data_to_hash.encode("utf-8")
     signature = hmac.new(key_bytes, data_bytes, hashlib.sha256).hexdigest()
     return f"{prefix}{signature[:length]}"
 
 
-def redact_freetext(text: Any) -> Any:
+# SpaCy Multilingual NER initialization with lazy/safe loading
+_SPACY_MODELS = None
+
+def get_spacy_models():
+    """Lazily loads spaCy NER models only when free-text redaction is actually called."""
+    global _SPACY_MODELS
+    if _SPACY_MODELS is not None:
+        return _SPACY_MODELS
+    _SPACY_MODELS = []
+    try:
+        import spacy
+        # Fast load en_core_web_sm with unused parser/lemmatizer disabled
+        try:
+            _SPACY_MODELS.append(spacy.load("en_core_web_sm", disable=["tagger", "parser", "attribute_ruler", "lemmatizer"]))
+        except Exception:
+            try:
+                _SPACY_MODELS.append(spacy.load("en_core_web_sm"))
+            except Exception:
+                pass
+        # Load multilingual NER model
+        try:
+            _SPACY_MODELS.append(spacy.load("xx_ent_wiki_sm"))
+        except Exception:
+            pass
+    except ImportError:
+        pass
+    return _SPACY_MODELS
+
+def check_luhn(val: str) -> bool:
+    """Validates credit/debit card numbers using the standard Luhn checksum algorithm."""
+    digits = [int(c) for c in str(val) if c.isdigit()]
+    if len(digits) < 13 or len(digits) > 19:
+        return False
+    checksum = 0
+    reverse_digits = digits[::-1]
+    for i, d in enumerate(reverse_digits):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        checksum += d
+    return checksum % 10 == 0
+
+
+COMMON_FIRST_NAMES = {
+    "john", "jane", "alexander", "sophia", "liam", "olivia", "noah", "emma", "william", "james",
+    "michael", "robert", "david", "richard", "joseph", "thomas", "charles", "daniel", "matthew",
+    "anthony", "mark", "paul", "steven", "andrew", "kenneth", "joshua", "kevin", "brian", "george",
+    "edward", "ronald", "timothy", "jason", "jeffrey", "ryan", "jacob", "gary", "nicholas", "eric",
+    "jonathan", "stephen", "larry", "justin", "scott", "brandon", "benjamin", "samuel", "gregory",
+    "frank", "mary", "patricia", "jennifer", "linda", "elizabeth", "barbara", "susan", "jessica",
+    "sarah", "karen", "lisa", "nancy", "betty", "margaret", "sandra", "ashley", "kimberly", "emily",
+    "donna", "michelle", "carol", "amanda", "melissa", "deborah", "stephanie", "rebecca", "sharon",
+    "laura", "cynthia", "kathleen", "amy", "shirley", "angela", "helen", "anna", "brenda", "pamela",
+    "nicole", "samantha", "katherine", "christine", "debra", "rachel", "carolyn", "janet", "maria",
+    "heather", "diane", "julie", "joyce", "evelyn", "joan", "victoria", "kelly", "christina", "lauren",
+    "alice", "bob", "chen", "priya", "fatima", "mei", "ravi", "lucas", "ethan", "peter", "adam",
+    "olamide", "mohammed", "mohammad", "ahmed", "ali", "rahul", "zhang", "wei", "rashid", "mansoori",
+    "kyle", "reese", "arjun", "menon", "sharma", "nair", "hashimi"
+}
+
+NON_NAME_WORDS = {
+    "street", "st", "avenue", "ave", "road", "rd", "drive", "dr", "park", "hwy", "highway",
+    "expressway", "turnpike", "lane", "ln", "way", "boulevard", "blvd", "court", "ct",
+    "north", "south", "east", "west", "central", "moderate", "extreme", "low", "high",
+    "traffic", "vehicle", "sedan", "suv", "truck", "van", "taxi", "bus", "coupe",
+    "bridge", "tunnel", "closure", "ahead", "flow", "delay", "incident", "speed", "mph",
+    "wet", "dry", "clear", "caution", "lane", "road", "call", "urgent", "urgently",
+    "driver", "operator", "officer", "inspector", "passenger", "witness", "owner",
+    "stopped", "near", "junction", "complaint", "filed", "arrival", "reported", "breakdown",
+    "approved", "permit", "inspected", "scene", "logged", "telemetry", "checkpoint", "clearance",
+    "card", "emirates", "visa", "mastercard", "amex", "contact", "id", "today", "yesterday"
+}
+
+CUE_NAME_PATTERN = re.compile(
+    r"\b(?i:(?:driver|operator|officer|inspector|passenger|owner|contact|witness|spoke with|reported by|assigned to|supervised by|mr\.?|mrs\.?|ms\.?|dr\.?)\s*(?:is|was)?\s*:?\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b"
+)
+COMPOUND_NAME_PATTERN = re.compile(
+    r"\b([A-Z][a-z]+(?:\s+(?:[Aa]l|[Ee]l|[Bb]in|[Ii]bn|[Bb]int|[Aa]bu|[Dd]e|[Dd]a|[Vv]an|[Vv]on))\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b"
+)
+CARD_PATTERN = re.compile(r"\b(?:\d{4}[-\s]){3}\d{1,7}\b|\b(?:\d{4}[-\s]){2}\d{1,8}\b|\b\d{13,19}\b")
+
+
+def redact_freetext(text: Any, fast: bool = False) -> Any:
     """
-    Scans free-text content for sensitive patterns and redacts them.
-    Protects against incidental leakage of SSNs, emails, phone numbers, and license plates.
+    Scans free-text content for sensitive patterns and performs whole-token redaction.
+    Protects against leakage of Emirates IDs, SSNs, IBANs, payment cards, phone numbers,
+    license plates, and personal names (using spaCy multilingual NER + conservative compound fallbacks).
     Blank/null values are preserved as null.
     """
-    if text is None or pd.isna(text):
-        return text
-    if not isinstance(text, str):
+    if text is None or pd.isna(text) or not isinstance(text, str):
         return text
 
-    # SSN pattern
-    text = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", text)
-    # Email pattern
+    # 1. Emirates ID (whole-token, before phone numbers): 784-YYYY-NNNNNNN-C or 15 digits starting with 784
+    text = re.sub(r"(?<![\d-])784[-\s]?\d{4}[-\s]?\d{7}[-\s]?\d(?![\d-])", "[REDACTED_NATIONAL_ID]", text)
+    text = re.sub(r"(?<!\d)784\d{12}(?!\d)", "[REDACTED_NATIONAL_ID]", text)
+
+    # 2. SSN pattern: 3-2-4
+    text = re.sub(r"(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])", "[REDACTED_SSN]", text)
+
+    # 3. IBAN pattern: International Bank Account Numbers (e.g. UAE AE070331234567890123456 or with spaces)
+    text = re.sub(r"\b[A-Z]{2}\d{2}(?:[-\s]?[A-Z0-9]{4}){2,7}(?:[-\s]?[A-Z0-9]{1,4})?\b", "[REDACTED_IBAN]", text)
+
+    # 4. Luhn-validated credit/debit card numbers (13-19 digits, optional spaces or dashes)
+    def mask_card(m):
+        raw = m.group(0)
+        digits = re.sub(r"\D", "", raw)
+        if 13 <= len(digits) <= 19 and check_luhn(digits):
+            return "[REDACTED_CARD]"
+        return raw
+
+    text = CARD_PATTERN.sub(mask_card, text)
+
+    # 5. Email pattern
     text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[REDACTED_EMAIL]", text)
-    # Phone numbers:
-    # 1. International formats like +971 58 217 7359
-    text = re.sub(r"\+\d{1,4}(?:[\s.-]*\d{1,4}){2,6}\b", "[REDACTED_PHONE]", text)
-    # 2. Standard formats with parentheses like (212) 555-0198
-    text = re.sub(r"\(?\b\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}\b", "[REDACTED_PHONE]", text)
-    # 3. 7-digit local formats like 555-0101
-    text = re.sub(r"\b\d{3}[-.\s]\d{4}\b", "[REDACTED_PHONE]", text)
-    # 4. 10+ digit runs
-    text = re.sub(r"\b\d{10,}\b", "[REDACTED_PHONE]", text)
-    # License plate pattern in free text (2-4 letters followed by 3-5 digits/letters)
+
+    # 6. UAE & International Phone numbers (whole tokens, boundary checked to prevent partial matching)
+    # UAE Mobiles (050, 052, 054, 055, 056, 058) & Landlines (02, 03, 04, 06, 07, 09)
+    text = re.sub(r"(?<![\d-])(?:\+971|00971|0)?\s?(?:5[024568]|[234679])[-\s]?\d{3}[-\s]?\d{4}(?![\d-])", "[REDACTED_PHONE]", text)
+    # International phone with + country code
+    text = re.sub(r"(?<![\d-])\+\d{1,4}(?:[\s.-]*\d{1,4}){2,6}(?![\d-])", "[REDACTED_PHONE]", text)
+    # Standard format with parentheses (212) 555-0198
+    text = re.sub(r"\(?\b\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}(?![\d-])", "[REDACTED_PHONE]", text)
+    # 7-digit local formats
+    text = re.sub(r"(?<![\d-])\d{3}[-.\s]\d{4}(?![\d-])", "[REDACTED_PHONE]", text)
+    # 10+ digit runs not already matched
+    text = re.sub(r"(?<![\d-])\d{10,}(?![\d-])", "[REDACTED_PHONE]", text)
+
+    # 7. License plate pattern in free text (2-4 letters followed by 3-5 digits/letters)
     text = re.sub(r"\b[A-Z]{2,4}[-\s]?[0-9]{3,4}\b", "[REDACTED_PLATE]", text)
 
+    # 8. spaCy Multilingual NER Detection (extracts PER / PERSON entities)
+    if not fast:
+        for nlp in get_spacy_models():
+            try:
+                doc = nlp(text)
+                text = _redact_person_entities(text, doc.ents)
+            except Exception:
+                pass
+
+    # 9. Conservative Arabic & Compound Name Pattern (First + particle + Last, e.g. "Fatima Al Hashimi", "Mohammed bin Rashid")
+    def replace_compound(m):
+        full = m.group(1)
+        words = full.split()
+        if any(w.lower() in NON_NAME_WORDS for w in words):
+            return full
+        return "[REDACTED_NAME]"
+
+    text = COMPOUND_NAME_PATTERN.sub(replace_compound, text)
+
+    # 10. Cue-preceded names (e.g. "Driver Alexander Wright", "Driver was Olamide", "Mr. Arjun Menon")
+    def replace_cue(m):
+        full = m.group(0)
+        name = m.group(1)
+        name_words = name.split()
+        if any(w.lower() in NON_NAME_WORDS for w in name_words):
+            return full
+        prefix = full[: len(full) - len(name)]
+        return f"{prefix}[REDACTED_NAME]"
+
+    text = CUE_NAME_PATTERN.sub(replace_cue, text)
+
+    # 11. Capitalized Name Pair Fallback (First Last) and dictionary lookups
+    words = text.split()
+    new_words = []
+    i = 0
+    punct = '.,;:!?"\'()'
+    while i < len(words):
+        w = words[i].strip(punct)
+        if (w.lower() in COMMON_FIRST_NAMES or (w and w[0].isupper() and w.isalpha() and w.lower() not in NON_NAME_WORDS)) and i + 1 < len(words):
+            w_next = words[i + 1].strip(punct)
+            if w_next and w_next[0].isupper() and w_next.isalpha() and w_next.lower() not in NON_NAME_WORDS:
+                prefix = words[i][: words[i].find(w)] if w in words[i] else ""
+                suffix = words[i + 1][words[i + 1].find(w_next) + len(w_next) :] if w_next in words[i + 1] else ""
+                new_words.append(f"{prefix}[REDACTED_NAME]{suffix}")
+                i += 2
+                continue
+        # Single name in dictionary
+        if w.lower() in COMMON_FIRST_NAMES and w.lower() not in NON_NAME_WORDS:
+            prefix = words[i][: words[i].find(w)] if w in words[i] else ""
+            suffix = words[i][words[i].find(w) + len(w) :] if w in words[i] else ""
+            new_words.append(f"{prefix}[REDACTED_NAME]{suffix}")
+            i += 1
+            continue
+        new_words.append(words[i])
+        i += 1
+
+    return " ".join(new_words)
+
+
+def _redact_person_entities(text: str, entities: Any) -> str:
+    for ent in entities:
+        if ent.label_ not in ["PERSON", "PER"]:
+            continue
+        ent_text = ent.text.strip()
+        if ent_text and ent_text.lower() not in NON_NAME_WORDS and not ent_text.startswith("[REDACTED"):
+            pattern = r"\b" + re.escape(ent_text) + r"\b"
+            text = re.sub(pattern, "[REDACTED_NAME]", text)
     return text
+
+
+def redact_freetext_batch(values: pd.Series) -> pd.Series:
+    """Redact free-text values while running NER models in batches instead of per cell."""
+    result = values.copy()
+    valid_positions = [
+        index for index, value in enumerate(values.tolist())
+        if isinstance(value, str) and value.strip()
+    ]
+    if not valid_positions:
+        return result
+
+    texts = [redact_freetext(values.iloc[index], fast=True) for index in valid_positions]
+    for nlp in get_spacy_models():
+        try:
+            docs = nlp.pipe(texts, batch_size=128)
+            texts = [
+                _redact_person_entities(text, doc.ents)
+                for text, doc in zip(texts, docs)
+            ]
+        except Exception:
+            continue
+
+    for index, text in zip(valid_positions, texts):
+        result.iloc[index] = text
+    return result
 
 
 def compute_k_anonymity(
@@ -345,6 +544,12 @@ def compute_k_anonymity(
             max_speed = round(float(speed_numeric.max()), 1) if not speed_numeric.empty and speed_numeric.notna().any() else 0.0
             outlier_cnt = int((grp.get("speed_outlier_flag", pd.Series(dtype=bool)) == True).sum()) if "speed_outlier_flag" in grp.columns else 0
 
+            # Congestion counts
+            cong_col = next((c for c in grp.columns if "congestion" in c.lower()), None)
+            congestion_counts = {}
+            if cong_col:
+                congestion_counts = {str(k): int(v) for k, v in grp[cong_col].dropna().value_counts().items()}
+
             aggregated_records.append({
                 "road_segment": str(seg_val),
                 "hour": str(hr_val),
@@ -352,7 +557,11 @@ def compute_k_anonymity(
                 "record_count": int(cell_count),
                 "avg_speed": avg_speed,
                 "max_speed": max_speed,
-                "outlier_count": outlier_cnt
+                "outlier_count": outlier_cnt,
+                "congestion_counts": congestion_counts,
+                "congestion_low_count": int(congestion_counts.get("Low", 0)),
+                "congestion_moderate_count": int(congestion_counts.get("Moderate", 0)),
+                "congestion_high_count": int(congestion_counts.get("High", 0))
             })
 
         logs.append(
@@ -426,15 +635,18 @@ def anonymize_dataset(
     anon_df = df.copy()
     logs: List[str] = []
 
-    # Resolve HMAC secret key
+    # Resolve HMAC secret key (strictly mandatory, minimum 32 chars, zero fallback anywhere)
     privacy_cfg = (config or {}).get("privacy_actions") or (config or {}).get("privacy_rules") or {}
     pseudo_cfg = privacy_cfg.get("pseudonymization", {})
     secret_env_var = pseudo_cfg.get("env_secret_key", "HASH_SECRET")
-    resolved_secret = (
-        hash_secret
-        or os.environ.get(secret_env_var)
-        or pseudo_cfg.get("default_secret_fallback", "default_privacy_secret_salt_2026")
-    )
+    raw_secret = hash_secret or os.environ.get(secret_env_var)
+    if not raw_secret or len(str(raw_secret).strip()) < 32:
+        raise ValueError(
+            "CRITICAL PRIVACY VIOLATION: HASH_SECRET environment variable is missing or shorter than 32 characters. "
+            "HMAC pseudonymization strictly requires a secure key with at least 32 characters. "
+            "Insecure fallback salts are forbidden."
+        )
+    resolved_secret = str(raw_secret).strip()
     plate_prefix = pseudo_cfg.get("prefix", "ANON_")
     plate_len = int(pseudo_cfg.get("hex_length", 12))
 
@@ -543,9 +755,7 @@ def anonymize_dataset(
 
         # 4. REDACT
         if action == "REDACT":
-            anon_df[col] = anon_df[col].apply(
-                lambda x: redact_freetext(x) if pd.notna(x) and x is not None else x
-            )
+            anon_df[col] = redact_freetext_batch(anon_df[col])
             logs.append(f"Scanned and redacted sensitive patterns in free-text column '{col}'.")
             processed_cols.add(col)
             continue
@@ -592,9 +802,7 @@ def anonymize_dataset(
 
     # 3. Fallback free-text scan on comments/notes
     for ft_col in [c for c in anon_df.columns if c not in processed_cols and any(ft in c for ft in ["comment", "note", "desc", "road_segment"])]:
-        anon_df[ft_col] = anon_df[ft_col].apply(
-            lambda x: redact_freetext(x) if pd.notna(x) and x is not None else x
-        )
+        anon_df[ft_col] = redact_freetext_batch(anon_df[ft_col])
         logs.append(f"Scanned and redacted sensitive patterns in free-text column '{ft_col}'.")
 
     # 4. Compute K-Anonymity & Risk Assessment

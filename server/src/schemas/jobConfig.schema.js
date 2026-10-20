@@ -29,6 +29,9 @@ export function validateJobConfig(config) {
   if (normalized.risk_reduction_mode && !normalized.riskReductionMode) {
     normalized.riskReductionMode = normalized.risk_reduction_mode;
   }
+  if (normalized.riskReductionMode) {
+    normalized.riskReductionMode = String(normalized.riskReductionMode).trim().toLowerCase();
+  }
   if (!normalized.riskReductionMode && normalized.suppressLowK) {
     normalized.riskReductionMode = 'suppress';
   }
@@ -37,6 +40,9 @@ export function validateJobConfig(config) {
   }
   if (normalized.k && !normalized.kThreshold) {
     normalized.kThreshold = Number(normalized.k);
+  }
+  if (normalized.kThreshold !== undefined && normalized.kThreshold !== null) {
+    normalized.kThreshold = Number(normalized.kThreshold);
   }
   return jobConfigSchema.safeParse(normalized);
 }

@@ -37,6 +37,7 @@ if (typeof document !== 'undefined' && document.documentElement) {
 export const useThemeStore = create((set, get) => ({
   theme: savedTheme,
   animationLevel: savedAnim, // 'full' | 'reduced' | 'off'
+  reduceMotion: savedAnim === 'reduced' || savedAnim === 'off',
 
   setTheme: (newTheme) => {
     setStorage('tdp_theme', newTheme);
@@ -51,7 +52,16 @@ export const useThemeStore = create((set, get) => ({
     if (typeof document !== 'undefined' && document.documentElement) {
       document.documentElement.setAttribute('data-anim', level);
     }
-    set({ animationLevel: level });
+    set({
+      animationLevel: level,
+      reduceMotion: level === 'reduced' || level === 'off'
+    });
+  },
+
+  toggleReduceMotion: () => {
+    const nextReduced = !get().reduceMotion;
+    const nextLevel = nextReduced ? 'reduced' : 'full';
+    get().setAnimationLevel(nextLevel);
   },
 
   getThemeColors: () => {

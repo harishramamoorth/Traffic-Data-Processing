@@ -22,7 +22,7 @@ export default function DataPreview({ beforeData = [], afterData = [] }) {
         <div>
           <h3 style={{ fontSize: '1.15rem' }}>🔍 Dataset Preview (Before vs. After)</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            Compare raw ingested values against sanitized, pseudonymized, and anonymized outputs.
+            Compare raw ingested values against sanitized and pseudonymized outputs.
           </p>
         </div>
 
@@ -46,7 +46,7 @@ export default function DataPreview({ beforeData = [], afterData = [] }) {
               className={`nav-btn ${viewMode === 'after' ? 'active' : ''}`}
               onClick={() => setViewMode('after')}
             >
-              Anonymized ({afterData.length})
+              Pseudonymized ({afterData.length})
             </button>
           </div>
         ) : (
@@ -70,7 +70,7 @@ export default function DataPreview({ beforeData = [], afterData = [] }) {
           <p style={{ maxWidth: '650px', margin: '0 auto', fontSize: '0.88rem', lineHeight: '1.6' }}>
             In accordance with strict privacy engineering, raw identifying data is held exclusively in memory
             for the active upload session. Raw records are deleted immediately post-processing and never
-            persisted to database or disk. To explore all anonymized records, please switch to the <strong>Records</strong> tab.
+            persisted to database or disk. To explore all pseudonymized records, please switch to the <strong>Records</strong> tab.
           </p>
         </div>
       ) : currentData.length === 0 ? (

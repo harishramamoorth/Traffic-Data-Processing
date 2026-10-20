@@ -1,31 +1,32 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldAlert, ArrowLeft, Home } from 'lucide-react';
+import { AlertCircle, ArrowLeft } from 'lucide-react';
 
 export default function NotFound() {
   return (
-    <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-6 space-y-5">
-      <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center shadow-lg shadow-rose-500/20">
-        <ShieldAlert className="w-8 h-8" />
+    <div className="min-h-[55vh] flex flex-col items-center justify-center text-center p-6 space-y-4">
+      <div className="w-12 h-12 rounded-xl bg-theme-secondary border border-theme-border text-theme-muted flex items-center justify-center">
+        <AlertCircle className="w-6 h-6 text-theme-dim" />
       </div>
 
       <div className="space-y-1">
-        <h1 className="text-4xl font-extrabold text-theme-text font-mono">404</h1>
-        <h2 className="text-lg font-bold text-theme-muted">Telemetry Route Not Found</h2>
-        <p className="text-xs text-theme-dim max-w-sm mx-auto">
-          The requested path does not exist or has been sanitized by privacy protocols.
+        <span className="text-3xl font-bold font-mono text-theme-text">404</span>
+        <h1 className="text-base font-semibold text-theme-text">Page Not Found</h1>
+        <p className="text-xs text-theme-muted max-w-sm mx-auto">
+          The requested page does not exist or may have been moved.
         </p>
       </div>
 
-      <div className="flex items-center gap-3 pt-2">
+      <div className="pt-2">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 text-black text-xs font-bold shadow-lg shadow-cyan-500/20"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors shadow-sm"
         >
-          <Home className="w-4 h-4" />
-          <span>Return to Dashboard</span>
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Back to Dashboard</span>
         </Link>
       </div>
     </div>
   );
 }
+

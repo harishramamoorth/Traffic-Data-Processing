@@ -83,7 +83,7 @@ test.describe('Traffic Data Processor E2E Flow', () => {
     await executeBtn.click();
 
     // Wait for Processing (Step 4) and transition to Results (Step 5)
-    await expect(page.getByText(/Privacy Audit & Anonymization Results/i)).toBeVisible({ timeout: 45000 });
+    await expect(page.getByText(/Privacy Audit & (?:Anonymization|Pseudonymization) Results/i)).toBeVisible({ timeout: 45000 });
 
     // 6. Verify Results Page
     // Verify status badge & compliance warning

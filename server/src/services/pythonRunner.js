@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 
 // Path to processor/main.py
 const PROCESSOR_SCRIPT = path.resolve(__dirname, '../../../processor/main.py');
-const TIMEOUT_MS = 60000; // 60-second processing execution timeout
+const TIMEOUT_MS = env.PYTHON_PROCESS_TIMEOUT_MS;
 
 /**
  * Runs dataset profiling in memory without executing processing or persisting data.
@@ -16,7 +16,7 @@ const TIMEOUT_MS = 60000; // 60-second processing execution timeout
  * @param {boolean} sample - Whether to use synthetic test dataset.
  * @returns {Promise<object>} Parsed profile output.
  */
-export function runPythonProfiler(filePath, sample = false) {
+export function runPythonProfiler(filePath, sample = false, sheet = null) {
   return new Promise((resolve, reject) => {
     const pythonExecutable = env.PYTHON_PATH;
     const args = [
@@ -28,6 +28,10 @@ export function runPythonProfiler(filePath, sample = false) {
       args.push('--sample');
     } else {
       args.push('--input', filePath);
+    }
+
+    if (sheet) {
+      args.push('--sheet', String(sheet));
     }
 
     console.log(`[PythonRunner] Profiling dataset: ${pythonExecutable} ${args.join(' ')}`);
@@ -91,7 +95,7 @@ export function runPythonProfiler(filePath, sample = false) {
  * @param {boolean} sample - Whether to run on sample dataset.
  * @returns {Promise<object>} Parsed output payload from Python pipeline.
  */
-export function runPythonProcessor(filePath, configOverride = null, onProgress = null, sample = false) {
+export function runPythonProcessor(filePath, configOverride = null, onProgress = null, sample = false, sheet = null) {
   return new Promise((resolve, reject) => {
     const pythonExecutable = env.PYTHON_PATH;
     const args = [
@@ -104,6 +108,11 @@ export function runPythonProcessor(filePath, configOverride = null, onProgress =
       args.push('--sample');
     } else {
       args.push('--input', filePath);
+    }
+
+    const effectiveSheet = sheet || (configOverride && configOverride.sheet ? configOverride.sheet : null);
+    if (effectiveSheet) {
+      args.push('--sheet', String(effectiveSheet));
     }
 
     if (configOverride) {

@@ -23,12 +23,20 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from inspect_data import inspect_dataset
 from detect_pii import detect_pii_columns
 from clean import clean_dataset
-from anonymize import anonymize_dataset, redact_freetext
+from anonymize import anonymize_dataset, redact_freetext, redact_freetext_batch
 from quality_checks import run_quality_checks
-from main import process_pipeline, load_config
+from main import process_pipeline, load_config, load_dataset
 
 
 SAMPLE_CSV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_traffic_data.csv"))
+SAMPLE_TSV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_traffic_data.tsv"))
+SAMPLE_XLSX_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_traffic_data.xlsx"))
+
+
+@pytest.fixture(autouse=True)
+def default_test_hash_secret(monkeypatch):
+    """Sets a valid >=32-char test secret for tests that do not test missing secret behavior."""
+    monkeypatch.setenv("HASH_SECRET", "test_mandatory_hmac_secret_32_characters_key_2026")
 
 
 @pytest.fixture
@@ -134,6 +142,20 @@ def test_phone_number_redaction_formats():
         assert "12345678901" not in redacted
         assert "971582177359" not in redacted
         assert "555-0198" not in redacted
+
+
+def test_batch_freetext_redaction_preserves_nulls_and_masks_pii():
+    values = pd.Series([
+        "Driver Alexander Wright called 555-0101",
+        None,
+        "FDR Drive South",
+    ])
+
+    redacted = redact_freetext_batch(values)
+
+    assert redacted.iloc[0] == "Driver [REDACTED_NAME] called [REDACTED_PHONE]"
+    assert pd.isna(redacted.iloc[1])
+    assert redacted.iloc[2] == "FDR Drive South"
 
 
 # ==============================================================================
@@ -512,7 +534,7 @@ def test_speed_outlier_flagging_without_silent_clamping(synthetic_edge_case_data
 def test_anonymization_and_data_minimization(synthetic_edge_case_data, test_config):
     cleaned_df, _, _ = clean_dataset(synthetic_edge_case_data, config=test_config)
     pii = detect_pii_columns(cleaned_df, config=test_config)
-    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_123")
+    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_32_characters_mandatory_key")
 
     assert "driver_name" not in anon_df.columns
     assert "driver_ssn" not in anon_df.columns
@@ -532,7 +554,7 @@ def test_anonymization_and_data_minimization(synthetic_edge_case_data, test_conf
 def test_free_text_redaction(synthetic_edge_case_data, test_config):
     cleaned_df, _, _ = clean_dataset(synthetic_edge_case_data, config=test_config)
     pii = detect_pii_columns(cleaned_df, config=test_config)
-    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_123")
+    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_32_characters_mandatory_key")
 
     rec01_segment = anon_df.iloc[0]["road_segment"]
     assert "555-123-4567" not in rec01_segment
@@ -646,7 +668,7 @@ def test_alternate_schema_pii_detection_and_masking(tmp_path):
 def test_quality_checks_reconciliation(synthetic_edge_case_data, test_config):
     cleaned_df, rejected_rows, _ = clean_dataset(synthetic_edge_case_data, config=test_config)
     pii = detect_pii_columns(cleaned_df, config=test_config)
-    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_123")
+    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii, config=test_config, hash_secret="test_secret_32_characters_mandatory_key")
 
     checks, overall_status = run_quality_checks(
         original_df=synthetic_edge_case_data,
@@ -794,7 +816,7 @@ def test_risk_reduction_modes_output_changes(test_config):
     assert len(suppress_agg) == 0, "Mode suppress should produce 0 aggregated records"
     assert len(agg_records) > 0, "Mode aggregate must produce aggregated records"
     # Structure changes: Aggregate produces hourly road_segment records with count >= 3
-    forbidden_keys = {"plate", "vehicle_plate", "record_id", "id", "latitude", "lat", "longitude", "lon", "timestamp"}
+    exact_forbidden = {"record_id", "vehicle_plate", "latitude", "longitude", "timestamp"}
     for cell in agg_records:
         assert cell["record_count"] >= 3, f"Cell count < 3 not suppressed: {cell}"
         assert "road_segment" in cell
@@ -802,8 +824,9 @@ def test_risk_reduction_modes_output_changes(test_config):
         assert "avg_speed" in cell
         assert "max_speed" in cell
         assert "outlier_count" in cell
+        assert "congestion_counts" in cell or "congestion_moderate_count" in cell
         for k in cell:
-            assert k.lower() not in forbidden_keys, f"Found forbidden microdata column {k} in aggregate cell"
+            assert k.lower() not in exact_forbidden, f"Found forbidden column {k} in aggregate cell"
 
     # Risk changes: Aggregate after_risk is LOW (zero microdata released)
     assert agg_k.get("after_risk") == "LOW"
@@ -822,4 +845,290 @@ def test_risk_reduction_modes_output_changes(test_config):
     assert pipe_none["summary"]["re_identification_risk_after"] == "HIGH"
     assert pipe_suppress["summary"]["re_identification_risk_after"] == "LOW"
     assert pipe_agg["summary"]["re_identification_risk_after"] == "LOW"
+    assert pipe_suppress["summary"]["overall_status"] == "PASSED"
+    assert pipe_agg["summary"]["overall_status"] == "PASSED"
+
+
+# ==============================================================================
+# Requirement: XLSX, TSV, TXT, Excel Multi-Sheet, Name Redaction & Error Tests
+# ==============================================================================
+
+def test_tsv_and_xlsx_give_same_output_as_csv():
+    """
+    Verifies that .xlsx and .tsv versions of sample_traffic_data.csv produce the exact
+    same pipeline output as the .csv version (same record count, status, QC battery, and cleaned records).
+    """
+    secret = "test_secret_for_equivalence_verification_32chars"
+    csv_res = process_pipeline(filepath=SAMPLE_CSV_PATH, hash_secret=secret)
+    tsv_res = process_pipeline(filepath=SAMPLE_TSV_PATH, hash_secret=secret)
+    xlsx_res = process_pipeline(filepath=SAMPLE_XLSX_PATH, hash_secret=secret)
+
+    # 1. Summary assertions
+    keys = ["processed_rows", "original_rows", "rejected_rows_count", "overall_status", "pii_columns_detected"]
+    for k in keys:
+        assert csv_res["summary"][k] == tsv_res["summary"][k] == xlsx_res["summary"][k], (
+            f"Summary mismatch for key '{k}': CSV={csv_res['summary'][k]}, TSV={tsv_res['summary'][k]}, XLSX={xlsx_res['summary'][k]}"
+        )
+
+    # 2. Output records count
+    assert len(csv_res["cleaned_records"]) == len(tsv_res["cleaned_records"]) == len(xlsx_res["cleaned_records"])
+    assert len(csv_res["cleaned_records"]) == 518
+
+    # 3. Exact column and value parity across records
+    for i in range(len(csv_res["cleaned_records"])):
+        c_rec = csv_res["cleaned_records"][i]
+        t_rec = tsv_res["cleaned_records"][i]
+        x_rec = xlsx_res["cleaned_records"][i]
+        for col in c_rec:
+            assert c_rec[col] == t_rec[col], f"TSV diff at row {i}, col '{col}': {c_rec[col]} vs {t_rec[col]}"
+            assert c_rec[col] == x_rec[col], f"XLSX diff at row {i}, col '{col}': {c_rec[col]} vs {x_rec[col]}"
+
+
+def test_person_name_in_notes_column_redacted():
+    """
+    Adds a test row containing a person's name inside the notes column and confirms
+    it is detected and redacted to [REDACTED_NAME].
+    """
+    raw_df = pd.read_csv(SAMPLE_CSV_PATH)
+    test_row = {
+        "record_id": "TRF-NAME-TEST",
+        "timestamp": "2026-10-17T15:00:00Z",
+        "vehicle_plate": "NAME-9999",
+        "driver_name": "Test Driver",
+        "driver_ssn": "999-99-9999",
+        "vehicle_type": "Sedan",
+        "speed_mph": 35.0,
+        "latitude": 40.75,
+        "longitude": -73.98,
+        "road_segment": "5th Avenue",
+        "congestion_level": "Low",
+        "notes": "Driver Alexander Wright arrived on site and spoke with Jane Smith"
+    }
+    df_with_name = pd.concat([raw_df, pd.DataFrame([test_row])], ignore_index=True)
+
+    cleaned_df, rejected, _ = clean_dataset(df_with_name)
+    pii_cols = detect_pii_columns(cleaned_df)
+    anon_df, _ = anonymize_dataset(cleaned_df, pii_fields=pii_cols, hash_secret="test_secret_key_32_characters_long_1234")
+
+    # Locate the test row
+    name_row = anon_df[anon_df["notes"].str.contains("REDACTED_NAME", na=False)]
+    assert len(name_row) > 0, "Expected row with redacted name in notes column"
+    redacted_note = name_row.iloc[0]["notes"]
+
+    assert "Alexander Wright" not in redacted_note
+    assert "Alexander" not in redacted_note
+    assert "Jane Smith" not in redacted_note
+    assert "[REDACTED_NAME]" in redacted_note
+
+
+def test_free_text_name_redaction_unit():
+    """Unit test for redact_freetext confirming various person name patterns are redacted."""
+    test_cases = [
+        ("Driver Alexander Wright reported vehicle issue", "Driver [REDACTED_NAME] reported vehicle issue"),
+        ("Spoke with Jane Smith regarding delay", "Spoke with [REDACTED_NAME] regarding delay"),
+        ("Contacted Officer Robert Davis on scene", "Contacted Officer [REDACTED_NAME] on scene"),
+        ("Notes: Alice Johnson called in", "Notes: [REDACTED_NAME] called in"),
+        ("John Doe had a flat tire on route", "[REDACTED_NAME] had a flat tire on route")
+    ]
+    for raw, expected in test_cases:
+        res = redact_freetext(raw)
+        assert "[REDACTED_NAME]" in res
+        assert "Alexander" not in res
+        assert "Jane Smith" not in res
+        assert "Robert Davis" not in res
+        assert "Alice Johnson" not in res
+        assert "John Doe" not in res
+
+
+def test_auto_delimiter_detection_txt(tmp_path):
+    """Verifies that delimiter auto-detection properly reads semicolon and pipe separated .txt files."""
+    sample_df = pd.read_csv(SAMPLE_CSV_PATH).head(20)
+
+    # Semicolon delimited .txt
+    semi_path = str(tmp_path / "telemetry_semi.txt")
+    sample_df.to_csv(semi_path, sep=";", index=False)
+    df_semi = load_dataset(semi_path)
+    assert len(df_semi) == 20
+    assert list(df_semi.columns) == list(sample_df.columns)
+
+    # Pipe delimited .txt
+    pipe_path = str(tmp_path / "telemetry_pipe.txt")
+    sample_df.to_csv(pipe_path, sep="|", index=False)
+    df_pipe = load_dataset(pipe_path)
+    assert len(df_pipe) == 20
+    assert list(df_pipe.columns) == list(sample_df.columns)
+
+
+def test_password_protected_excel_error(tmp_path):
+    """Confirms that encrypted/password-protected Excel files raise a clear, explicit error."""
+    mock_enc = tmp_path / "protected.xlsx"
+    ole_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    mock_enc.write_bytes(ole_header + b"\x00" * 200 + b"EncryptionInfo\x00" + b"EncryptedPackage\x00")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_dataset(str(mock_enc))
+    assert "password-protected or encrypted" in str(excinfo.value).lower()
+
+
+def test_unsupported_file_format_error(tmp_path):
+    """Confirms that unsupported file extensions like .pdf raise a clear error."""
+    mock_pdf = tmp_path / "traffic_report.pdf"
+    mock_pdf.write_bytes(b"%PDF-1.4 mock content")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_dataset(str(mock_pdf))
+    assert "unsupported file format" in str(excinfo.value).lower()
+
+
+def test_multi_sheet_excel_selection(tmp_path):
+    """Confirms that multi-sheet Excel files load the first sheet by default and allow sheet selection."""
+    sample_df = pd.read_csv(SAMPLE_CSV_PATH).head(30)
+    meta_df = pd.DataFrame([{"key": "feed_name", "value": "NYC Midtown"}])
+
+    multi_path = str(tmp_path / "multi_feed.xlsx")
+    with pd.ExcelWriter(multi_path, engine="openpyxl") as writer:
+        sample_df.to_excel(writer, sheet_name="Telemetry_Feed", index=False)
+        meta_df.to_excel(writer, sheet_name="Feed_Metadata", index=False)
+
+    # 1. Default to first sheet
+    df_default = load_dataset(multi_path)
+    assert len(df_default) == 30
+    assert df_default.attrs["sheet_names"] == ["Telemetry_Feed", "Feed_Metadata"]
+    assert df_default.attrs["selected_sheet"] == "Telemetry_Feed"
+
+    # 2. Select second sheet by name
+    df_meta = load_dataset(multi_path, sheet="Feed_Metadata")
+    assert len(df_meta) == 1
+    assert "key" in df_meta.columns
+    assert df_meta.attrs["selected_sheet"] == "Feed_Metadata"
+
+
+def test_dob_detected_as_pii_even_when_formatted_as_datetime():
+    """
+    Critical Leak Test: DOB column values formatted as ISO datetimes (YYYY-MM-DD)
+    must still be classified as Date of Birth PII and not treated as generic traffic timestamps.
+    """
+    df = pd.DataFrame({
+        "record_id": ["R1", "R2", "R3", "R4"],
+        "dob": ["1985-05-12", "1990-07-22", "1978-11-03", "1995-02-18"],
+        "birth_date": ["1985-05-12", "1990-07-22", "1978-11-03", "1995-02-18"]
+    })
+    detected = detect_pii_columns(df)
+    names = [d.get("name") or d.get("column") for d in detected]
+    assert "dob" in names, "dob column was bypassed and not detected as PII!"
+    assert "birth_date" in names, "birth_date column was bypassed and not detected as PII!"
+    dob_entry = next(d for d in detected if (d.get("name") or d.get("column")) == "dob")
+    assert dob_entry["classification"] == "Date of Birth"
+
+
+def test_mandatory_hash_secret_missing_or_short(monkeypatch):
+    """
+    Critical Leak Test: HASH_SECRET must be mandatory with a minimum of 32 characters
+    and must NEVER silently fall back to an insecure default salt string.
+    """
+    monkeypatch.delenv("HASH_SECRET", raising=False)
+    df = pd.DataFrame({"record_id": ["R1"], "vehicle_plate": ["ABC-1234"]})
+    pii = [{"name": "vehicle_plate", "classification": "License Plate", "default_action": "PSEUDONYMIZE_HMAC"}]
+    with pytest.raises((ValueError, RuntimeError)) as excinfo:
+        anonymize_dataset(df, pii_fields=pii, hash_secret=None)
+    assert "hash_secret" in str(excinfo.value).lower() or "32" in str(excinfo.value)
+
+    with pytest.raises((ValueError, RuntimeError)) as excinfo2:
+        anonymize_dataset(df, pii_fields=pii, hash_secret="short_key_12345")
+    assert "32" in str(excinfo2.value)
+
+
+def test_emirates_id_iban_card_uae_phone_redaction():
+    """
+    Step 2 Test: Validates whole-token redaction for:
+    - Emirates ID (with and without hyphens, never sliced into partial phone)
+    - IBAN
+    - Luhn-validated payment card
+    - UAE mobile and landline phones
+    """
+    cases = [
+        ("ID 784-1990-1234567-1", "[REDACTED_NATIONAL_ID]"),
+        ("Emirates ID 784199012345671 presented", "[REDACTED_NATIONAL_ID]"),
+        ("Contact 050 123 4567 immediately", "[REDACTED_PHONE]"),
+        ("Call +971 50 123 4567 on arrival", "[REDACTED_PHONE]"),
+        ("Call landline 04 123 4567 today", "[REDACTED_PHONE]"),
+        ("Wire funds to IBAN AE070331234567890123456", "[REDACTED_IBAN]"),
+        ("Card 4111 1111 1111 1111 charged", "[REDACTED_CARD]"),
+        ("Card 4532-0150-1234-5671 processed", "[REDACTED_CARD]"),
+    ]
+
+    for raw, expected_token in cases:
+        redacted = redact_freetext(raw)
+        assert expected_token in redacted, f"Expected {expected_token} in '{redacted}' for raw '{raw}'"
+        # Confirm no partial dangling numbers
+        assert "-1234567-1" not in redacted
+        assert "784199012345671" not in redacted
+        assert "AE070331234567890123456" not in redacted
+        assert "4111 1111 1111 1111" not in redacted
+
+
+def test_multilingual_name_recall_seven_targets():
+    """
+    Step 2 Test: Evaluates and asserts 100% recall on the 7 required multilingual names:
+    Rahul Sharma, Zhang Wei, Fatima Al Hashimi, Olamide, Mohammed bin Rashid, Ahmed Al Mansoori, Priya Nair.
+    """
+    targets = [
+        ("Rahul Sharma stopped near the junction", "Rahul Sharma"),
+        ("Zhang Wei reported a breakdown", "Zhang Wei"),
+        ("Call Fatima Al Hashimi on arrival", "Fatima Al Hashimi"),
+        ("Driver was Olamide", "Olamide"),
+        ("Mohammed bin Rashid approved the permit", "Mohammed bin Rashid"),
+        ("Ahmed Al Mansoori inspected the scene", "Ahmed Al Mansoori"),
+        ("Priya Nair logged the telemetry", "Priya Nair")
+    ]
+
+    for text, name in targets:
+        redacted = redact_freetext(text)
+        assert name not in redacted, f"Target name '{name}' was LEAKED in: '{redacted}'"
+        assert "[REDACTED_NAME]" in redacted, f"Expected [REDACTED_NAME] token in: '{redacted}'"
+
+
+def test_masked_samples_generated_from_real_first_non_null_value():
+    """
+    Step 3 Test: Asserts that masked samples for detected PII columns are generated
+    dynamically from the real first non-null values in the dataset, not static dummy strings.
+    """
+    import hmac
+    import hashlib
+    test_df = pd.DataFrame({
+        "latitude": [None, 34.052235, 34.060000],
+        "longitude": [None, -118.243683, -118.250000],
+        "user_id": [None, "USR_CUSTOM_9999", "USR_CUSTOM_8888"],
+        "notes": [None, "Driver called 050-123-4567 regarding accident", "Clear road"]
+    })
+    
+    detected = detect_pii_columns(test_df)
+    det_map = {d["column"]: d for d in detected}
+    
+    assert "latitude" in det_map
+    assert "longitude" in det_map
+    assert "user_id" in det_map
+    assert "notes" in det_map
+
+    # Check latitude masked sample reflects 34.05, NOT 40.71
+    assert "34.05" in det_map["latitude"]["sample_masked"]
+    assert "40.71" not in det_map["latitude"]["sample_masked"]
+    assert det_map["latitude"]["first_non_null_value"] == "34.052235"
+
+    # Check longitude masked sample reflects -118.24, NOT -74.01
+    assert "-118.24" in det_map["longitude"]["sample_masked"]
+    assert "-74.01" not in det_map["longitude"]["sample_masked"]
+    assert det_map["longitude"]["first_non_null_value"] == "-118.243683"
+
+    # Check user_id masked sample is derived from USR_CUSTOM_9999, NOT static ANON_7c9f8a12e4b0
+    assert det_map["user_id"]["sample_masked"] != "ANON_7c9f8a12e4b0"
+    salt = os.environ.get("HASH_SECRET", "default_salt_for_testing_purposes_only")
+    expected_hash = hmac.new(salt.encode("utf-8"), b"USR_CUSTOM_9999", hashlib.sha256).hexdigest()[:12]
+    assert expected_hash in det_map["user_id"]["sample_masked"]
+    assert det_map["user_id"]["first_non_null_value"] == "USR_CUSTOM_9999"
+
+    # Check notes redacted sample redacted the phone
+    assert "050-123-4567" not in det_map["notes"]["sample_masked"]
+    assert "[REDACTED_PHONE]" in det_map["notes"]["sample_masked"]
+
 

@@ -55,7 +55,7 @@ export default function DownloadsTab({ job }) {
         >
           <div>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📜</div>
-            <h4 style={{ color: '#fff', marginBottom: '0.3rem' }}>Anonymized JSON</h4>
+            <h4 style={{ color: '#fff', marginBottom: '0.3rem' }}>Pseudonymized JSON</h4>
             <p style={{ color: 'var(--text-dim)', fontSize: '0.8rem', marginBottom: '1.25rem' }}>
               Structured JSON payload optimized for mobility APIs, GIS layers, and cloud data warehouses.
             </p>
@@ -98,6 +98,37 @@ export default function DownloadsTab({ job }) {
             Download Report (.md)
           </a>
         </div>
+
+        {/* Aggregated Dataset (k-anonymized) */}
+        {(job.aggregatedRecords?.length > 0 || job.config?.riskReductionMode === 'aggregate') && (
+          <div
+            style={{
+              padding: '1.5rem',
+              background: 'rgba(16, 185, 129, 0.05)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📈</div>
+              <h4 style={{ color: '#10b981', marginBottom: '0.3rem' }}>Aggregated Dataset (k-anonymized)</h4>
+              <p style={{ color: 'var(--text-dim)', fontSize: '0.8rem', marginBottom: '1.25rem' }}>
+                Hourly road segment statistics (counts, speeds, congestion, outliers). Zero microdata, k ≥ {job.config?.kThreshold ?? 3}.
+              </p>
+            </div>
+            <a
+              href={`/api/jobs/${job.id}/download?type=aggregate`}
+              download
+              className="btn-primary"
+              style={{ width: '100%', textAlign: 'center', background: '#10b981', borderColor: '#10b981' }}
+            >
+              Download Aggregated CSV
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

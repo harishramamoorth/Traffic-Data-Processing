@@ -1,14 +1,24 @@
 import { db } from '../config/db.js';
 import { jobStreamService } from '../services/jobStreamService.js';
 
+function sanitizeCsvValue(val) {
+  if (val === null || val === undefined) return '';
+  let str = String(val);
+  // Protection against spreadsheet formula injection (=, +, -, @, \t, \r)
+  if (/^[=+\-@\t\r]/.test(str)) {
+    const isPureNumber = /^[+\-]?\d+(\.\d+)?$/.test(str.trim());
+    if (!isPureNumber) {
+      str = `'${str}`;
+    }
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
 function jsonToCsv(items) {
   if (!items || items.length === 0) return '';
   const headers = Object.keys(items[0]);
   const rows = items.map(item =>
-    headers.map(h => {
-      const val = item[h] === null || item[h] === undefined ? '' : String(item[h]);
-      return `"${val.replace(/"/g, '""')}"`;
-    }).join(',')
+    headers.map(h => sanitizeCsvValue(item[h])).join(',')
   );
   return [headers.join(','), ...rows].join('\r\n');
 }
@@ -87,20 +97,48 @@ export const jobsController = {
       ];
 
       // 3. Before vs After Null % per Column
-      const inspectionCols = job.inspection?.column_details || {};
+      const nullCounts = job.inspection?.null_counts || {};
+      const nullPcts = job.inspection?.null_percentages || {};
+      const nullReport = job.nullReport || job.summary?.null_report || {};
       const nullDistribution = [];
       const originalRows = job.summary?.original_rows || 1;
       const processedRows = records.length || 1;
 
-      for (const [colName, details] of Object.entries(inspectionCols)) {
-        // Find after null count
-        const afterNullCount = records.filter(r => r[colName] === null || r[colName] === undefined || r[colName] === '').length;
+      const candidateCols = Object.keys(nullCounts).length > 0 
+        ? Object.keys(nullCounts) 
+        : Object.keys(nullReport).length > 0 
+          ? Object.keys(nullReport) 
+          : (job.inspection?.columns || []);
+
+      for (const colName of candidateCols) {
+        if (colName === 'notes' || colName.includes('_flag') || colName === 'driver_name' || colName === 'driver_ssn') continue;
+
+        // Raw input null percentage
+        let beforePct = 0;
+        if (nullPcts[colName] !== undefined) {
+          beforePct = Number(nullPcts[colName]);
+        } else if (nullCounts[colName] !== undefined) {
+          beforePct = Number(((nullCounts[colName] / originalRows) * 100).toFixed(1));
+        }
+
+        // Cleaned output null percentage
+        let afterPct = 0;
+        if (nullReport[colName]?.null_pct !== undefined) {
+          afterPct = Number(nullReport[colName].null_pct);
+        } else {
+          const afterNullCount = records.filter(r => r[colName] === null || r[colName] === undefined || r[colName] === '').length;
+          afterPct = Number(((afterNullCount / processedRows) * 100).toFixed(1));
+        }
+
         nullDistribution.push({
           column: colName,
-          beforeNullPct: Math.round(((details.null_count || 0) / originalRows) * 100),
-          afterNullPct: Math.round((afterNullCount / processedRows) * 100)
+          beforeNullPct: beforePct,
+          afterNullPct: afterPct
         });
       }
+
+      // Prioritize columns with detected missing values first, then standard attributes
+      nullDistribution.sort((a, b) => (b.beforeNullPct + b.afterNullPct) - (a.beforeNullPct + a.afterNullPct));
 
       // 4. Records Per Hour (00 to 23)
       const hoursMap = {};
@@ -233,7 +271,11 @@ export const jobsController = {
           record_count: r.record_count,
           avg_speed: r.avg_speed,
           max_speed: r.max_speed,
-          outlier_count: r.outlier_count
+          outlier_count: r.outlier_count,
+          congestion_low_count: r.congestion_low_count ?? 0,
+          congestion_moderate_count: r.congestion_moderate_count ?? 0,
+          congestion_high_count: r.congestion_high_count ?? 0,
+          congestion_counts: typeof r.congestion_counts === 'object' ? JSON.stringify(r.congestion_counts) : (r.congestion_counts || '')
         }));
 
         if (format === 'json') {
@@ -243,7 +285,7 @@ export const jobsController = {
         } else {
           const csvData = aggRecords.length > 0
             ? jsonToCsv(aggRecords)
-            : 'road_segment,hour,record_count,avg_speed,max_speed,outlier_count\r\n';
+            : 'road_segment,hour,record_count,avg_speed,max_speed,outlier_count,congestion_low_count,congestion_moderate_count,congestion_high_count,congestion_counts\r\n';
           res.setHeader('Content-Type', 'text/csv');
           res.setHeader('Content-Disposition', 'attachment; filename="aggregated.csv"');
           return res.send(csvData);
@@ -280,7 +322,9 @@ export const jobsController = {
       }
 
       if (format === 'json') {
-        return res.json({
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="audit-report-${id}.json"`);
+        return res.send(JSON.stringify({
           success: true,
           report: {
             jobId: job.id,
@@ -295,7 +339,7 @@ export const jobsController = {
             suppressedCount: job.suppressedCount || 0,
             rejectedRowsCount: (job.rejectedRows || []).length
           }
-        });
+        }, null, 2));
       }
 
       const summary = job.summary || {};

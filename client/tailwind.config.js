@@ -29,7 +29,7 @@ export default {
         'theme-glow-lg': '0 0 45px var(--accent-glow)'
       },
       fontFamily: {
-        sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace']
       },
       animation: {

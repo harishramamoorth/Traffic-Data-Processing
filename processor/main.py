@@ -16,11 +16,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from inspect_data import inspect_dataset
-from detect_pii import detect_pii_columns
-from clean import clean_dataset
-from anonymize import anonymize_dataset
-from quality_checks import run_quality_checks
 from profile_data import profile_dataset
 
 
@@ -67,24 +62,140 @@ def load_config(config_path: str | None = None, config_json: str | None = None) 
 
 
 
-def load_dataset(filepath: str) -> pd.DataFrame:
-    """Loads CSV or JSON datasets, supporting chunked streaming for files up to 50MB."""
+def is_excel_encrypted(filepath: str) -> bool:
+    """Detects whether an Excel file (.xlsx or .xls) is password-protected/encrypted."""
+    try:
+        with open(filepath, "rb") as f:
+            header = f.read(4096)
+        if header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") and (
+            b"EncryptionInfo" in header or b"EncryptedPackage" in header
+        ):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def detect_delimiter(filepath: str, sample_size: int = 8192) -> str:
+    """Auto-detects delimiter for .txt or .csv files using Sniffer and frequency analysis."""
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            sample = f.read(sample_size)
+        if not sample:
+            return ","
+        import csv
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+            return dialect.delimiter
+        except Exception:
+            first_line = sample.splitlines()[0] if sample.splitlines() else sample
+            counts = {c: first_line.count(c) for c in [",", "\t", ";", "|"]}
+            best = max(counts, key=counts.get)
+            return best if counts[best] > 0 else ","
+    except Exception:
+        return ","
+
+
+def load_dataset(filepath: str, sheet: str | int | None = None) -> pd.DataFrame:
+    """
+    Loads .csv, .tsv, .txt (delimiter auto-detected), .json, .xlsx, .xls datasets.
+    Supports multi-sheet Excel files (defaulting to first sheet if unspecified).
+    Enforces 50MB file size limits and validates encryption/corruption status.
+    """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Input file not found: {filepath}")
 
-    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+    file_size_bytes = os.path.getsize(filepath)
+    file_size_mb = file_size_bytes / (1024 * 1024)
+    if file_size_mb > 50.0:
+        raise ValueError(f"File size ({file_size_mb:.1f}MB) exceeds the maximum allowed 50MB limit.")
 
-    if filepath.endswith(".json"):
-        return pd.read_json(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
 
-    # For large CSV files (> 10MB), read in chunks to conserve memory
-    if file_size_mb > 10.0 and filepath.endswith(".csv"):
-        chunks = []
-        for chunk in pd.read_csv(filepath, chunksize=10000, low_memory=False):
-            chunks.append(chunk)
-        return pd.concat(chunks, ignore_index=True)
+    # 1. JSON
+    if ext == ".json":
+        try:
+            return pd.read_json(filepath)
+        except Exception as e:
+            raise ValueError(f"Failed to read JSON dataset: {e}")
 
-    return pd.read_csv(filepath, low_memory=False)
+    # 2. Excel (.xlsx, .xls)
+    if ext in [".xlsx", ".xls"]:
+        if is_excel_encrypted(filepath):
+            raise ValueError(
+                "The Excel file is password-protected or encrypted. Please remove password protection before uploading."
+            )
+
+        try:
+            with pd.ExcelFile(filepath) as excel_file:
+                sheet_names = excel_file.sheet_names
+                if not sheet_names:
+                    raise ValueError("The Excel workbook contains no visible sheets.")
+
+                target_sheet = 0
+                if sheet is not None:
+                    if str(sheet).isdigit() and int(sheet) < len(sheet_names):
+                        target_sheet = int(sheet)
+                    elif str(sheet) in sheet_names:
+                        target_sheet = str(sheet)
+                    else:
+                        target_sheet = sheet_names[0]
+                else:
+                    target_sheet = sheet_names[0]
+
+                df = pd.read_excel(excel_file, sheet_name=target_sheet)
+                df.attrs["sheet_names"] = sheet_names
+                df.attrs["selected_sheet"] = str(target_sheet if isinstance(target_sheet, str) else sheet_names[target_sheet])
+                return df
+        except Exception as e:
+            err_msg = str(e)
+            if "encrypted" in err_msg.lower() or "password" in err_msg.lower() or "protected" in err_msg.lower():
+                raise ValueError(
+                    "The Excel file is password-protected or encrypted. Please remove password protection before uploading."
+                )
+            raise ValueError(f"Failed to read Excel workbook: {err_msg}")
+
+    # 3. TSV (.tsv)
+    if ext == ".tsv":
+        try:
+            if file_size_mb > 10.0:
+                chunks = []
+                for chunk in pd.read_csv(filepath, sep="\t", chunksize=10000, low_memory=False):
+                    chunks.append(chunk)
+                return pd.concat(chunks, ignore_index=True)
+            return pd.read_csv(filepath, sep="\t", low_memory=False)
+        except Exception as e:
+            raise ValueError(f"Failed to read TSV dataset: {e}")
+
+    # 4. Text (.txt) - Auto-detect delimiter
+    if ext == ".txt":
+        try:
+            delimiter = detect_delimiter(filepath)
+            if file_size_mb > 10.0:
+                chunks = []
+                for chunk in pd.read_csv(filepath, sep=delimiter, chunksize=10000, low_memory=False):
+                    chunks.append(chunk)
+                return pd.concat(chunks, ignore_index=True)
+            return pd.read_csv(filepath, sep=delimiter, low_memory=False)
+        except Exception as e:
+            raise ValueError(f"Failed to read text dataset: {e}")
+
+    # 5. CSV (.csv)
+    if ext == ".csv":
+        try:
+            if file_size_mb > 10.0:
+                chunks = []
+                for chunk in pd.read_csv(filepath, chunksize=10000, low_memory=False):
+                    chunks.append(chunk)
+                return pd.concat(chunks, ignore_index=True)
+            return pd.read_csv(filepath, low_memory=False)
+        except Exception as e:
+            raise ValueError(f"Failed to read CSV dataset: {e}")
+
+    # 6. Unsupported format
+    raise ValueError(
+        f"Unsupported file format '{ext}'. Supported formats are .csv, .tsv, .txt, .json, .xlsx, and .xls."
+    )
 
 
 def generate_sample_data() -> pd.DataFrame:
@@ -120,11 +231,18 @@ def process_pipeline(
     config_path: str | None = None,
     config_json: str | None = None,
     hash_secret: str | None = None,
-    config_override: Dict[str, Any] | None = None
+    config_override: Dict[str, Any] | None = None,
+    sheet: str | int | None = None
 ) -> Dict[str, Any]:
     """
     Executes the comprehensive traffic data transformation and privacy pipeline.
     """
+    from inspect_data import inspect_dataset
+    from detect_pii import detect_pii_columns
+    from clean import clean_dataset
+    from anonymize import anonymize_dataset
+    from quality_checks import run_quality_checks
+
     now_str = lambda: datetime.now(timezone.utc).strftime("%H:%M:%S")
     logs: List[str] = []
 
@@ -147,6 +265,7 @@ def process_pipeline(
     # 2. Ingest Data
     emit_progress("load", 20, "Ingesting dataset into memory...")
     sample_file = os.path.join(os.path.dirname(__file__), "sample_traffic_data.csv")
+    effective_sheet = sheet or (config or {}).get("sheet")
     if generate_sample or not filepath:
         if os.path.exists(sample_file):
             raw_df = load_dataset(sample_file)
@@ -155,8 +274,9 @@ def process_pipeline(
             raw_df = generate_sample_data()
             record_log(f"Ingested synthetic test dataset ({len(raw_df)} records).")
     else:
-        raw_df = load_dataset(filepath)
-        record_log(f"Successfully loaded {len(raw_df)} records from '{os.path.basename(filepath)}'.")
+        raw_df = load_dataset(filepath, sheet=effective_sheet)
+        sheet_info = f" [Sheet: '{raw_df.attrs.get('selected_sheet')}']" if raw_df.attrs.get("selected_sheet") else ""
+        record_log(f"Successfully loaded {len(raw_df)} records from '{os.path.basename(filepath)}'{sheet_info}.")
 
     # 3. Stage 1: Data Inspection
     emit_progress("load", 30, "Inspecting data schema and duplicates...")
@@ -224,9 +344,14 @@ def process_pipeline(
             "total_rows": total_output_rows
         }
 
-    # 9. In-Memory Before vs After Comparison (max 20 rows, NOT to be persisted in DB)
+    # 9. In-Memory Before vs After Comparison (max 20 rows, sanitized with PII masked, NOT to be persisted in DB)
     sample_limit = min(20, (config or {}).get("quality_checks", {}).get("max_before_after_sample_rows", 20))
-    sample_before = json.loads(raw_df.head(sample_limit).to_json(orient="records", date_format="iso"))
+    raw_preview_df = raw_df.head(sample_limit).copy()
+    pii_col_set = {str(p.get("name") or p.get("column", "")).strip().lower() for p in pii_report}
+    for col in raw_preview_df.columns:
+        if str(col).strip().lower() in pii_col_set:
+            raw_preview_df[col] = "[CONFIDENTIAL_PII_PROTECTED]"
+    sample_before = json.loads(raw_preview_df.to_json(orient="records", date_format="iso"))
     sample_after = json.loads(anonymized_df.head(sample_limit).to_json(orient="records", date_format="iso"))
 
     # 10. Cleaned Records (Anonymized rows ready for DB persistence)
@@ -235,7 +360,19 @@ def process_pipeline(
     risk_lvl = k_anonymity_data.get("risk_level", "LOW")
     honest_privacy_claim = f"No direct identifiers detected; re-identification risk: {risk_lvl}"
 
-    if risk_lvl == "HIGH":
+    risk_mode = str(k_anonymity_data.get("risk_reduction_mode", "none")).lower()
+    k_target = int(k_anonymity_data.get("k_threshold", 3))
+    k_achieved = int(k_anonymity_data.get("k_min", 0))
+
+    if risk_mode in ["suppress", "aggregate"] and k_achieved >= k_target:
+        if overall_status != "FAILED":
+            overall_status = "PASSED"
+            compliance_status = "COMPLIANCE_VERIFIED"
+            compliance_explanation = (
+                f"PASSED: Risk reduction ({risk_mode.title()} mode, K={k_target}) successfully enforced "
+                f"k_min={k_achieved} >= {k_target}. Cohort privacy verified."
+            )
+    elif risk_lvl == "HIGH":
         compliance_status = "PASSED_WITH_WARNINGS"
         compliance_explanation = (
             f"PASSED_WITH_WARNINGS: Re-identification risk is High ({k_anonymity_data.get('percent_low_k', 0.0)}% rows with k<3). "
@@ -298,6 +435,12 @@ def process_pipeline(
         }
     }
 
+    if getattr(raw_df, "attrs", {}).get("sheet_names"):
+        output_payload["sheet_names"] = raw_df.attrs["sheet_names"]
+        output_payload["selected_sheet"] = raw_df.attrs.get("selected_sheet", "")
+        output_payload["summary"]["sheet_names"] = raw_df.attrs["sheet_names"]
+        output_payload["summary"]["selected_sheet"] = raw_df.attrs.get("selected_sheet", "")
+
     return output_payload
 
 
@@ -308,6 +451,7 @@ def main():
     parser.add_argument("--config", "-c", type=str, help="Path to config.yaml file")
     parser.add_argument("--config-json", type=str, help="Dynamic JSON string overriding config rules")
     parser.add_argument("--hash-secret", "-s", type=str, help="Secret key for HMAC-SHA256 pseudonymization")
+    parser.add_argument("--sheet", type=str, help="Excel sheet name or index to process (defaults to first sheet)")
     parser.add_argument("--sample", action="store_true", help="Execute pipeline using built-in synthetic test data")
     parser.add_argument("--profile", action="store_true", help="Generate rapid pre-processing dataset profile only")
 
@@ -316,9 +460,12 @@ def main():
     try:
         if args.profile:
             sample_file = os.path.join(os.path.dirname(__file__), "sample_traffic_data.csv")
+            config = load_config(args.config, args.config_json)
+            effective_sheet = args.sheet or (config or {}).get("sheet")
+
             if args.sample or not args.input:
                 if os.path.exists(sample_file):
-                    raw_df = load_dataset(sample_file)
+                    raw_df = load_dataset(sample_file, sheet=effective_sheet)
                     filename = "sample_traffic_data.csv"
                     file_size = os.path.getsize(sample_file)
                 else:
@@ -326,13 +473,12 @@ def main():
                     filename = "sample_traffic_data.csv"
                     file_size = 1200
             else:
-                raw_df = load_dataset(args.input)
+                raw_df = load_dataset(args.input, sheet=effective_sheet)
                 filename = os.path.basename(args.input)
                 file_size = os.path.getsize(args.input)
 
-            config = load_config(args.config, args.config_json)
             profile_results = profile_dataset(raw_df, filename=filename, file_size=file_size, config=config)
-            print(json.dumps(profile_results, indent=2))
+            print(json.dumps(profile_results, indent=2, default=json_default))
             sys.exit(0)
 
         results = process_pipeline(
@@ -340,7 +486,8 @@ def main():
             generate_sample=args.sample,
             config_path=args.config,
             config_json=args.config_json,
-            hash_secret=args.hash_secret
+            hash_secret=args.hash_secret,
+            sheet=args.sheet
         )
 
         if args.output:

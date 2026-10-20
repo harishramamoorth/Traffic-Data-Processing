@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings as SettingsIcon, Palette, Zap, Sparkles, Check, Monitor } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Zap, ShieldCheck, Check } from 'lucide-react';
 import { useThemeStore, THEMES } from '../store/useThemeStore';
 import { useWorkflowStore, PRESETS } from '../store/useWorkflowStore';
 import { useToast } from '../components/Toast';
@@ -15,35 +15,36 @@ export default function Settings() {
   const applyPreset = useWorkflowStore((s) => s.applyPreset);
 
   const ANIM_LEVELS = [
-    { id: 'full', name: 'Full (60 FPS)', desc: '3D particle stream, smooth Framer Motion transitions' },
-    { id: 'reduced', name: 'Reduced Motion', desc: 'Lightweight 2D fallbacks, minimal animations' },
-    { id: 'off', name: 'Off (High Performance)', desc: 'Static rendering for low-power or terminal devices' }
+    { id: 'full', name: 'Standard (Full)', desc: 'Smooth transitions and 3D preview' },
+    { id: 'reduced', name: 'Reduced Motion', desc: 'Minimal transitions, lower GPU usage' },
+    { id: 'off', name: 'Off', desc: 'Static rendering for lower resource usage' }
   ];
 
   return (
-    <div className="space-y-8 pb-16 max-w-4xl mx-auto">
+    <div className="space-y-6 pb-16 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="p-6 rounded-2xl bg-theme-card border border-theme-border shadow-xl space-y-1">
+      <div className="p-5 sm:p-6 rounded-xl bg-theme-card border border-theme-border space-y-1">
         <div className="flex items-center gap-2">
-          <SettingsIcon className="w-5 h-5 text-cyan-400" />
-          <h1 className="text-2xl font-bold text-theme-text">Platform Settings & Accessibility</h1>
+          <SettingsIcon className="w-5 h-5 text-indigo-500" />
+          <h1 className="text-xl sm:text-2xl font-bold text-theme-text tracking-tight">Settings</h1>
         </div>
-        <p className="text-xs text-theme-dim">
-          Configure UI theme palettes, animation complexity, and default compliance presets.
+        <p className="text-xs text-theme-muted">
+          Manage theme palette, animations, and default privacy presets.
         </p>
       </div>
 
       {/* 1. Theme Selection */}
-      <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-        <div className="flex items-center gap-2">
-          <Palette className="w-4 h-4 text-cyan-400" />
-          <h2 className="text-sm font-bold text-theme-text uppercase tracking-wider">UI Theme Palette</h2>
+      <div className="p-5 sm:p-6 rounded-xl bg-theme-card border border-theme-border space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-theme-text flex items-center gap-2">
+            <Palette className="w-4 h-4 text-theme-dim" /> Theme
+          </h2>
+          <p className="text-xs text-theme-dim mt-0.5">
+            Choose a visual appearance for the interface.
+          </p>
         </div>
-        <p className="text-xs text-theme-dim">
-          Switch among 5 curated palettes. Charts, 3D scenes, badges, and gradients update automatically.
-        </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {THEMES.map((th) => {
             const isSelected = th.id === theme;
             return (
@@ -52,25 +53,25 @@ export default function Settings() {
                 type="button"
                 onClick={() => {
                   setTheme(th.id);
-                  addToast(`Theme switched to ${th.name}.`, 'info');
+                  addToast(`Theme set to ${th.name}.`, 'info');
                 }}
-                className={`p-4 rounded-xl text-left border transition-all flex flex-col justify-between ${
+                className={`p-3.5 rounded-lg text-left border transition-colors flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'bg-theme-secondary border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)] ring-1 ring-cyan-400'
-                    : 'bg-theme-secondary/40 border-theme-border hover:border-theme-border/80'
+                    ? 'bg-theme-secondary/70 border-indigo-500 ring-1 ring-indigo-500/50'
+                    : 'bg-theme-secondary/30 border-theme-border hover:border-theme-border/80 hover:bg-theme-secondary/50'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span
-                      className="w-3.5 h-3.5 rounded-full shadow-sm"
+                      className="w-3 h-3 rounded-full shrink-0"
                       style={{ backgroundColor: th.accent }}
                     />
-                    <span className="text-xs font-bold text-theme-text">{th.name}</span>
+                    <span className="text-xs font-semibold text-theme-text">{th.name}</span>
                   </div>
-                  {isSelected && <Check className="w-4 h-4 text-cyan-400" />}
+                  {isSelected && <Check className="w-4 h-4 text-indigo-500" />}
                 </div>
-                <p className="text-[11px] text-theme-dim mt-2">{th.desc}</p>
+                <p className="text-[11px] text-theme-dim mt-2 leading-snug">{th.desc}</p>
               </button>
             );
           })}
@@ -78,82 +79,110 @@ export default function Settings() {
       </div>
 
       {/* 2. Animation Level */}
-      <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-        <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-purple-400" />
-          <h2 className="text-sm font-bold text-theme-text uppercase tracking-wider">Animation & GPU Workload</h2>
+      <div className="p-5 sm:p-6 rounded-xl bg-theme-card border border-theme-border space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-theme-text flex items-center gap-2">
+            <Zap className="w-4 h-4 text-theme-dim" /> Animations & Motion
+          </h2>
+          <p className="text-xs text-theme-dim mt-0.5">
+            Adjust visual effects and graphics performance.
+          </p>
         </div>
-        <p className="text-xs text-theme-dim">
-          Control Framer Motion transitions and Three.js 3D rendering. Respects prefers-reduced-motion.
-        </p>
 
-        <div className="space-y-2.5 pt-1">
+        {/* Quick Reduce Motion Toggle */}
+        <div className="p-3.5 rounded-lg bg-theme-secondary/30 border border-theme-border flex items-center justify-between">
+          <div className="space-y-0.5">
+            <span className="text-xs font-semibold text-theme-text block">Reduce motion</span>
+            <p className="text-[11px] text-theme-dim">
+              Disable 3D previews and replace animations with instant transitions.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={animationLevel === 'reduced' || animationLevel === 'off'}
+            onClick={() => {
+              const willReduce = !(animationLevel === 'reduced' || animationLevel === 'off');
+              setAnimationLevel(willReduce ? 'reduced' : 'full');
+              addToast(willReduce ? 'Reduced motion enabled.' : 'Standard animations enabled.', 'info');
+            }}
+            className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors cursor-pointer ${
+              animationLevel === 'reduced' || animationLevel === 'off' ? 'bg-indigo-600' : 'bg-slate-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                animationLevel === 'reduced' || animationLevel === 'off' ? 'translate-x-5' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           {ANIM_LEVELS.map((lvl) => {
             const isSelected = animationLevel === lvl.id;
             return (
-              <div
+              <button
                 key={lvl.id}
+                type="button"
                 onClick={() => {
                   setAnimationLevel(lvl.id);
-                  addToast(`Animation mode set to ${lvl.name}.`, 'info');
+                  addToast(`Animation mode: ${lvl.name}.`, 'info');
                 }}
-                className={`p-4 rounded-xl cursor-pointer border transition-all flex items-center justify-between ${
+                className={`p-3 rounded-lg text-left border transition-colors flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'bg-purple-500/10 border-purple-500 shadow-sm'
-                    : 'bg-theme-secondary/40 border-theme-border hover:bg-theme-secondary/70'
+                    ? 'bg-theme-secondary/70 border-indigo-500 ring-1 ring-indigo-500/50'
+                    : 'bg-theme-secondary/30 border-theme-border hover:border-theme-border/80'
                 }`}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-theme-text">{lvl.name}</span>
-                    {isSelected && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono">
-                        Active
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-theme-dim mt-0.5">{lvl.desc}</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-theme-text">{lvl.name}</span>
+                  {isSelected && <Check className="w-3.5 h-3.5 text-indigo-500" />}
                 </div>
-                {isSelected && <Check className="w-4 h-4 text-purple-400" />}
-              </div>
+                <p className="text-[11px] text-theme-dim mt-1.5 leading-snug">{lvl.desc}</p>
+              </button>
             );
           })}
         </div>
       </div>
 
       {/* 3. Default Privacy Preset */}
-      <div className="p-6 rounded-2xl bg-theme-card border border-theme-border space-y-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <h2 className="text-sm font-bold text-theme-text uppercase tracking-wider">Default Privacy Preset</h2>
+      <div className="p-5 sm:p-6 rounded-xl bg-theme-card border border-theme-border space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-theme-text flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-theme-accent" /> Default Privacy Policy
+          </h2>
+          <p className="text-xs text-theme-dim mt-0.5">
+            Default protection profile pre-selected for new datasets.
+          </p>
         </div>
-        <p className="text-xs text-theme-dim">
-          Default policy applied when loading new datasets in the wizard.
-        </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {Object.entries(PRESETS).map(([key, p]) => {
             const isSelected = activePreset === key;
             return (
-              <div
+              <button
                 key={key}
+                type="button"
                 onClick={() => {
                   applyPreset(key);
-                  addToast(`Default preset set to ${p.name}.`, 'info');
+                  addToast(`Default preset: ${p.name}.`, 'info');
                 }}
-                className={`p-4 rounded-xl cursor-pointer border transition-all flex flex-col justify-between ${
+                className={`p-3.5 rounded-lg text-left border transition-colors flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'bg-emerald-500/10 border-emerald-500 shadow-sm'
-                    : 'bg-theme-secondary/40 border-theme-border hover:bg-theme-secondary/70'
+                    ? 'bg-theme-secondary/70 border-indigo-500 ring-1 ring-indigo-500/50'
+                    : 'bg-theme-secondary/30 border-theme-border hover:border-theme-border/80'
                 }`}
               >
                 <div>
-                  <span className="text-xs font-bold text-theme-text block">{p.name}</span>
-                  <span className="text-[10px] font-mono text-emerald-400">{p.badge}</span>
-                  <p className="text-[11px] text-theme-dim mt-1">{p.desc}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-theme-text">{p.name}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-500" />}
+                  </div>
+                  <span className="inline-block text-[10px] font-mono text-indigo-500 mt-0.5">{p.badge}</span>
+                  <p className="text-[11px] text-theme-dim mt-1 leading-snug">{p.desc}</p>
                 </div>
-                {isSelected && <Check className="w-4 h-4 text-emerald-400 self-end mt-2" />}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -161,3 +190,4 @@ export default function Settings() {
     </div>
   );
 }
+

@@ -7,17 +7,32 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const pythonProcessTimeoutMs = process.env.PYTHON_PROCESS_TIMEOUT_MS === undefined
+  ? 5 * 60 * 1000
+  : Number(process.env.PYTHON_PROCESS_TIMEOUT_MS);
+
+if (!Number.isSafeInteger(pythonProcessTimeoutMs) || pythonProcessTimeoutMs <= 0) {
+  throw new Error('PYTHON_PROCESS_TIMEOUT_MS must be a positive integer number of milliseconds.');
+}
 
 export const env = {
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || 'development',
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || process.env.CLIENT_URL || 'http://localhost:5173',
   PYTHON_PATH: process.env.PYTHON_PATH || 'python',
-  HASH_SECRET: process.env.HASH_SECRET || 'traffic_privacy_hmac_secret_2026_key',
+  PYTHON_PROCESS_TIMEOUT_MS: pythonProcessTimeoutMs,
+  HASH_SECRET: process.env.HASH_SECRET, // Strictly mandatory, zero fallback permitted
   UPLOAD_DIR: path.resolve(__dirname, '../../uploads'),
   PROCESSED_DIR: path.resolve(__dirname, '../../processed'),
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/traffic_processor'
 };
+
+if (!env.HASH_SECRET || env.HASH_SECRET.trim().length < 32) {
+  throw new Error(
+    'SECURITY CRITICAL: HASH_SECRET environment variable is missing or shorter than 32 characters. ' +
+    'Pseudonymization requires a verified >=32 character key. No insecure fallback is permitted.'
+  );
+}
 
 // Ensure required staging directories exist
 if (!fs.existsSync(env.UPLOAD_DIR)) {

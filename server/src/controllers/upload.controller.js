@@ -11,15 +11,19 @@ export const uploadController = {
    * Pre-processing analysis only. Computes statistics in memory and deletes raw temp file immediately.
    */
   async profileUpload(req, res, next) {
+    if (req.fileValidationError) {
+      return res.status(400).json({ success: false, error: req.fileValidationError });
+    }
     const isSample = req.body.sample === 'true' || req.body.sample === true || (!req.file && req.query.sample === 'true');
     if (!req.file && !isSample) {
       return res.status(400).json({ success: false, error: 'No dataset file provided for profiling.' });
     }
 
     const tempFilePath = req.file ? req.file.path : null;
+    const sheet = req.body.sheet || req.query.sheet || null;
 
     try {
-      const profile = await runPythonProfiler(tempFilePath, isSample);
+      const profile = await runPythonProfiler(tempFilePath, isSample, sheet);
       return res.status(200).json({
         success: true,
         message: 'Dataset profiling complete.',
@@ -27,9 +31,10 @@ export const uploadController = {
       });
     } catch (err) {
       console.error('[UploadController] Profiling error:', err.message);
-      return res.status(500).json({
+      const isClientError = /password-protected|encrypted|unsupported file format|empty dataset/i.test(err.message);
+      return res.status(isClientError ? 400 : 500).json({
         success: false,
-        error: `Profiling failed: ${err.message}`
+        error: isClientError ? err.message : `Profiling failed: ${err.message}`
       });
     } finally {
       // PRIVACY RULE: Delete raw temp file immediately in finally block
@@ -51,6 +56,9 @@ export const uploadController = {
    * Executes data cleaning, anonymization, and verification with dynamic config overrides and SSE log streaming.
    */
   async processUpload(req, res, next) {
+    if (req.fileValidationError) {
+      return res.status(400).json({ success: false, error: req.fileValidationError });
+    }
     const isSample = req.body.sample === 'true' || req.body.sample === true || (!req.file && req.query.sample === 'true');
     if (!req.file && !isSample) {
       return res.status(400).json({ success: false, error: 'No dataset file provided.' });
@@ -61,25 +69,34 @@ export const uploadController = {
 
     // Parse dynamic config if provided in form data
     let dynamicConfig = null;
+    let rawConfig = {};
     if (req.body.config) {
       try {
-        const rawConfig = typeof req.body.config === 'string' ? JSON.parse(req.body.config) : req.body.config;
-        const validation = validateJobConfig(rawConfig);
-        if (!validation.success) {
-          console.warn('[UploadController] Config validation warning:', validation.error.format());
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid job configuration schema.',
-            details: validation.error.format()
-          });
-        }
-        dynamicConfig = validation.data;
+        rawConfig = typeof req.body.config === 'string' ? JSON.parse(req.body.config) : req.body.config;
       } catch (e) {
         return res.status(400).json({
           success: false,
           error: `Malformed config JSON: ${e.message}`
         });
       }
+    }
+    if (req.body.riskReductionMode) rawConfig.riskReductionMode = req.body.riskReductionMode;
+    if (req.body.risk_reduction_mode) rawConfig.riskReductionMode = req.body.risk_reduction_mode;
+    if (req.body.kThreshold !== undefined) rawConfig.kThreshold = req.body.kThreshold;
+    if (req.body.k_threshold !== undefined) rawConfig.kThreshold = req.body.k_threshold;
+    if (req.body.k !== undefined) rawConfig.kThreshold = req.body.k;
+
+    if (Object.keys(rawConfig).length > 0) {
+      const validation = validateJobConfig(rawConfig);
+      if (!validation.success) {
+        console.warn('[UploadController] Config validation warning:', validation.error.format());
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid job configuration schema.',
+          details: validation.error.format()
+        });
+      }
+      dynamicConfig = validation.data;
     }
 
     // Initialize SSE streaming session
@@ -98,6 +115,7 @@ export const uploadController = {
       await db.saveJob(newJob);
 
       // Run Python Processing Engine with real-time SSE progress callbacks
+      const sheet = req.body.sheet || (dynamicConfig ? dynamicConfig.sheet : null);
       const processorOutput = await runPythonProcessor(
         tempFilePath,
         dynamicConfig,
@@ -115,7 +133,8 @@ export const uploadController = {
             });
           }
         },
-        isSample
+        isSample,
+        sheet
       );
 
       newJob.status = processorOutput.summary.overall_status === 'FAILED' ? 'FAILED' : 'COMPLETED';
@@ -162,12 +181,15 @@ export const uploadController = {
       });
     } catch (procErr) {
       newJob.status = 'FAILED';
-      newJob.error = procErr.message;
+      let safeError = procErr.message || 'Processing failed';
+      safeError = safeError.replace(/[A-Za-z]:\\[^\s"']+/g, '[INTERNAL_PATH]');
+      safeError = safeError.replace(/\/(?:[a-zA-Z0-9_.-]+\/)+[a-zA-Z0-9_.-]*/g, '[INTERNAL_PATH]');
+      newJob.error = safeError;
       await db.saveJob(newJob);
 
-      jobStreamService.emit(jobId, 'error', { message: procErr.message });
+      jobStreamService.emit(jobId, 'error', { message: safeError });
       jobStreamService.cleanup(jobId);
-      next(procErr);
+      next(new Error(safeError));
     } finally {
       // PRIVACY RULE: Delete raw uploaded temporary file immediately in finally block
       if (tempFilePath) {

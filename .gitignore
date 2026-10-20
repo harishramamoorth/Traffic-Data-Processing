@@ -22,6 +22,9 @@ uploads/
 processed/
 temp/
 output/
+scratch/
+processor/out_*.json
+processor/cli_*.json
 *.log
 
 # Build outputs

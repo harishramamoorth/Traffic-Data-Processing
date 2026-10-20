@@ -67,9 +67,8 @@ privacy_actions:
   pseudonymization:
     algorithm: "HMAC-SHA256"
     prefix: "ANON_"
-    hex_length: 12
     env_secret_key: "HASH_SECRET"
-    default_secret_fallback: "default_traffic_hmac_secret_2026_salt"
+    # Fallback secret removed: HASH_SECRET is strictly mandatory (minimum 32 characters)
 
   # Spatial & Temporal generalization
   generalization:

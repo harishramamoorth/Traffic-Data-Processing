@@ -29,7 +29,7 @@ Complete column dropping of direct personal identifiers, including:
 - Output Standard: `ANON_<first 12 hex characters>` (e.g., `ANON_332f994a2611`).
 
 ### Rationale
-- **Trajectory Continuity**: Deterministic hashing ensures that the same vehicle plate across multiple intersections or timestamps consistently maps to the same anonymous identifier, preserving trip linkage and origin-destination analysis.
+- **Trajectory Continuity**: Deterministic hashing ensures that the same vehicle plate across multiple intersections or timestamps consistently maps to the same pseudonymous identifier, preserving trip linkage and origin-destination analysis.
 - **Rainbow Table & Dictionary Attack Immunity**: Standard SHA-256 without a secret key is trivial to reverse for license plates due to their constrained search space (e.g., state format `AAA-1234` is easily brute-forced). HMAC-SHA256 prevents offline dictionary enumeration without possession of the secret key.
 
 ### Residual Risks & Limitations

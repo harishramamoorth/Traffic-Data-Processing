@@ -18,9 +18,9 @@ export const DEFAULT_CONFIG = {
 export const PRESET_DEFINITIONS = {
   max_privacy: {
     id: 'max_privacy',
-    name: 'Maximum Privacy',
-    badge: 'Enterprise Strict',
-    desc: 'Aggressive data minimization, 1-decimal GPS (~11 km), 60-min time bucketing, Suppress (K=3).',
+    name: 'Public Statistics (Max Privacy)',
+    badge: 'Public Portal / Strict',
+    desc: 'Aggressive data minimization, 1-decimal GPS (~11 km), 60-min time bucketing, Suppress (K=3) or Aggregate macro table.',
     gpsPrecision: 1,
     timeBucketMinutes: 60,
     outlierStrategy: 'set_null',
@@ -34,9 +34,9 @@ export const PRESET_DEFINITIONS = {
   },
   balanced: {
     id: 'balanced',
-    name: 'Balanced (Recommended)',
+    name: 'Protected Sharing (Recommended)',
     badge: 'Production Default',
-    desc: 'HMAC plate pseudonymization, 2-decimal GPS (~1.1 km), 15-min bucketing, zero silent loss.',
+    desc: 'HMAC plate pseudonymization, 2-decimal GPS (~1.1 km), 15-min bucketing, full row reconciliation.',
     gpsPrecision: 2,
     timeBucketMinutes: 15,
     outlierStrategy: 'flag_only',
@@ -52,7 +52,7 @@ export const PRESET_DEFINITIONS = {
   },
   max_utility: {
     id: 'max_utility',
-    name: 'Max Utility',
+    name: 'Internal Analysis (Max Utility)',
     badge: 'Analytics Optimized',
     desc: 'Fine-grained 3-decimal GPS (~110 m), 5-min time bucketing for high-resolution traffic telemetry.',
     gpsPrecision: 3,
@@ -74,7 +74,12 @@ export const PRESET_DEFINITIONS = {
  * Generates exact preset configuration given detected PII columns.
  */
 export function getPresetConfig(presetKey, piiColumns = []) {
-  const def = PRESET_DEFINITIONS[presetKey] || PRESET_DEFINITIONS.balanced;
+  let effectiveKey = presetKey;
+  if (presetKey === 'internal_analysis') effectiveKey = 'max_utility';
+  if (presetKey === 'protected_sharing') effectiveKey = 'balanced';
+  if (presetKey === 'public_statistics') effectiveKey = 'max_privacy';
+
+  const def = PRESET_DEFINITIONS[effectiveKey] || PRESET_DEFINITIONS.balanced;
   const piiActions = {};
   for (const p of piiColumns) {
     const colName = p.name || p.column;
@@ -182,6 +187,8 @@ export const useWorkflowStore = create((set, get) => ({
   // Profile Analysis Data (Step 2)
   profileData: null,
   isProfiling: false,
+  sheetNames: [],
+  selectedSheet: null,
 
   // Configuration (Step 3)
   activePreset: 'balanced',
@@ -202,11 +209,13 @@ export const useWorkflowStore = create((set, get) => ({
   setStep: (step) => set({ currentStep: step }),
 
   setFile: (file, isSample = false) => {
-    set({ file, isSample, currentStep: file || isSample ? 2 : 1 });
+    set({ file, isSample });
   },
 
   setUploadProgress: (progress) => set({ uploadProgress: progress }),
   setIsUploading: (val) => set({ isUploading: val }),
+
+  setSelectedSheet: (sheet) => set({ selectedSheet: sheet }),
 
   setProfileData: (data) => {
     // Auto-populate default PII actions based on single source of truth pii_columns
@@ -216,11 +225,17 @@ export const useWorkflowStore = create((set, get) => ({
       const colName = p.name || p.column;
       initialPiiActions[colName] = p.default_action || p.recommended_action || 'DROP_COLUMN';
     }
+    const sheetNames = data?.sheet_names || [];
+    const selectedSheet = data?.selected_sheet || (sheetNames.length > 0 ? sheetNames[0] : null);
+
     set((state) => ({
       profileData: data,
       isProfiling: false,
+      sheetNames,
+      selectedSheet,
       customConfig: {
         ...state.customConfig,
+        sheet: selectedSheet,
         piiActions: { ...initialPiiActions, ...state.customConfig.piiActions }
       }
     }));
@@ -240,12 +255,17 @@ export const useWorkflowStore = create((set, get) => ({
   },
 
   applyPreset: (presetKey) => {
+    let effectiveKey = presetKey;
+    if (presetKey === 'internal_analysis') effectiveKey = 'max_utility';
+    if (presetKey === 'protected_sharing') effectiveKey = 'balanced';
+    if (presetKey === 'public_statistics') effectiveKey = 'max_privacy';
+
     const { profileData } = get();
     const piiCols = profileData?.pii_columns || profileData?.detected_pii || [];
-    const presetOverrides = getPresetConfig(presetKey, piiCols);
+    const presetOverrides = getPresetConfig(effectiveKey, piiCols);
 
     set((state) => ({
-      activePreset: presetKey,
+      activePreset: effectiveKey,
       customConfig: {
         ...state.customConfig,
         ...presetOverrides
@@ -295,6 +315,8 @@ export const useWorkflowStore = create((set, get) => ({
       isSample: false,
       uploadProgress: 0,
       profileData: null,
+      sheetNames: [],
+      selectedSheet: null,
       activePreset: 'balanced',
       customConfig: { ...DEFAULT_CONFIG },
       jobId: null,

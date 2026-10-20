@@ -42,7 +42,22 @@ def profile_dataset(
     total_cols = int(len(df.columns))
 
     formatted_size = format_bytes(file_size)
-    f_type = "CSV" if (filename and filename.lower().endswith(".csv")) else ("JSON" if (filename and filename.lower().endswith(".json")) else "Telemetry Dataset")
+    ext = (filename.rsplit(".", 1)[-1].lower() if "." in filename else "") if filename else ""
+    if ext == "csv":
+        f_type = "CSV"
+    elif ext == "tsv":
+        f_type = "TSV"
+    elif ext == "txt":
+        f_type = "TXT"
+    elif ext in ["xlsx", "xls"]:
+        f_type = "Excel"
+    elif ext == "json":
+        f_type = "JSON"
+    else:
+        f_type = "Telemetry Dataset"
+
+    sheet_names = getattr(df, "attrs", {}).get("sheet_names", [])
+    selected_sheet = getattr(df, "attrs", {}).get("selected_sheet", "")
 
     if total_rows == 0:
         return {
@@ -52,6 +67,8 @@ def profile_dataset(
             "file_size_bytes": file_size,
             "file_size_formatted": formatted_size,
             "file_type": f_type,
+            "sheet_names": sheet_names,
+            "selected_sheet": selected_sheet,
             "row_count": 0,
             "column_count": total_cols,
             "columns": [],
@@ -272,6 +289,8 @@ def profile_dataset(
         "file_size_bytes": file_size,
         "file_size_formatted": formatted_size,
         "file_type": f_type,
+        "sheet_names": sheet_names,
+        "selected_sheet": selected_sheet,
         "row_count": total_rows,
         "column_count": total_cols,
         "columns": column_profiles,
