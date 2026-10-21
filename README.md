@@ -111,6 +111,29 @@ The API server will listen at `http://localhost:5000`.
 
 ---
 
+## ☁️ Render Cloud Deployment Guide
+
+### Option A: Native Node Web Service (Recommended)
+
+1. Connect GitHub repository `Traffic-Data-Processing-Backend`.
+2. Configure settings:
+   - **Environment**: `Node`
+   - **Build Command**: `npm run build` *(runs `npm --prefix server install && python3 -m venv .venv && .venv/bin/pip install -r processor/requirements.txt`)*
+   - **Start Command**: `npm start`
+3. Add Environment Variables:
+   - `HASH_SECRET`: Minimum 32-character key *(e.g. `production_traffic_secret_key_32_chars_long`)*
+   - `MONGODB_URI`: MongoDB Atlas connection string *(e.g. `mongodb+srv://user:pass@cluster.mongodb.net/traffic_processor?retryWrites=true&w=majority`)*
+   - `CLIENT_ORIGIN`: Your Vercel frontend URL *(e.g. `https://trafficdataprocessing.vercel.app`)*
+   - `PYTHON_PATH`: `/opt/render/project/src/.venv/bin/python` *(or leave blank; the server automatically auto-detects the virtualenv)*
+
+### Option B: Docker Deployment
+
+Render also supports 1-click Docker deployment using the included [Dockerfile](Dockerfile):
+- Select **Docker** environment on Render.
+- Set the same environment variables (`HASH_SECRET`, `MONGODB_URI`, `CLIENT_ORIGIN`).
+
+---
+
 ## 📡 API Endpoints
 
 | Method | Endpoint | Description |

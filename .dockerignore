@@ -1,0 +1,13 @@
+node_modules
+server/node_modules
+server/uploads/*
+server/processed/*
+.venv
+__pycache__
+processor/__pycache__
+processor/.pytest_cache
+processor/out_*.json
+processor/cli_*.json
+.git
+.env
+*.log
