@@ -15,11 +15,30 @@ if (!Number.isSafeInteger(pythonProcessTimeoutMs) || pythonProcessTimeoutMs <= 0
   throw new Error('PYTHON_PROCESS_TIMEOUT_MS must be a positive integer number of milliseconds.');
 }
 
+function resolvePythonPath() {
+  if (process.env.PYTHON_PATH) {
+    return process.env.PYTHON_PATH;
+  }
+  const venvLinux = path.resolve(__dirname, '../../../.venv/bin/python');
+  if (fs.existsSync(venvLinux)) {
+    return venvLinux;
+  }
+  const venvWindows = path.resolve(__dirname, '../../../.venv/Scripts/python.exe');
+  if (fs.existsSync(venvWindows)) {
+    return venvWindows;
+  }
+  const renderVenv = '/opt/render/project/src/.venv/bin/python';
+  if (fs.existsSync(renderVenv)) {
+    return renderVenv;
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
 export const env = {
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || 'development',
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || process.env.CLIENT_URL || 'http://localhost:5173',
-  PYTHON_PATH: process.env.PYTHON_PATH || 'python',
+  PYTHON_PATH: resolvePythonPath(),
   PYTHON_PROCESS_TIMEOUT_MS: pythonProcessTimeoutMs,
   HASH_SECRET: process.env.HASH_SECRET, // Strictly mandatory, zero fallback permitted
   UPLOAD_DIR: path.resolve(__dirname, '../../uploads'),
