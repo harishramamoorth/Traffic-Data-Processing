@@ -1,9 +1,13 @@
 import axios from 'axios';
 
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBase ? `${apiBase}/api` : '/api',
   timeout: 60000
 });
+
+export const getApiUrl = (endpoint) => `${apiBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
 export const trafficApi = {
   // Upload and process raw traffic dataset
@@ -57,13 +61,13 @@ export const trafficApi = {
   },
 
   // Download cleaned dataset as CSV or JSON
-  downloadUrl(jobId, format = 'csv') {
-    return `/api/jobs/${jobId}/download?format=${format}`;
+  downloadUrl(jobId, format = 'csv', type = 'row') {
+    return getApiUrl(`/api/jobs/${jobId}/download?format=${format}&type=${type}`);
   },
 
   // Download audit report as Markdown or JSON
   reportUrl(jobId, format = 'markdown') {
-    return `/api/jobs/${jobId}/report?format=${format}`;
+    return getApiUrl(`/api/jobs/${jobId}/report?format=${format}`);
   },
 
   // Delete a job and its records

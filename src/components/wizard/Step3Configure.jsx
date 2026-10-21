@@ -437,9 +437,8 @@ const ActionSelect = React.memo(function ActionSelect({
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border bg-theme-secondary/80 px-3 font-mono text-xs text-theme-text transition-all hover:border-theme-border hover:bg-theme-secondary ${
-          compact ? 'py-1.5' : 'py-2'
-        } ${open ? 'ring-2 ring-cyan-500/30' : ''}`}
+        className={`group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border bg-theme-secondary/80 px-3 font-mono text-xs text-theme-text transition-all hover:border-theme-border hover:bg-theme-secondary ${compact ? 'py-1.5' : 'py-2'
+          } ${open ? 'ring-2 ring-cyan-500/30' : ''}`}
         style={{
           borderColor: value === 'KEEP' ? rgba(T.rose, 0.7) : open ? rgba(meta.c, 0.7) : undefined,
           background: value === 'KEEP' ? rgba(T.rose, 0.1) : undefined,
@@ -450,9 +449,8 @@ const ActionSelect = React.memo(function ActionSelect({
           <span className="truncate">{activeOption.label}</span>
         </span>
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-theme-dim transition-transform duration-200 group-hover:text-theme-text ${
-            open ? 'rotate-180 text-theme-text' : ''
-          }`}
+          className={`h-3.5 w-3.5 shrink-0 text-theme-dim transition-transform duration-200 group-hover:text-theme-text ${open ? 'rotate-180 text-theme-text' : ''
+            }`}
         />
       </button>
 
@@ -484,17 +482,16 @@ const ActionSelect = React.memo(function ActionSelect({
                     onPick(opt.value);
                     setOpen(false);
                   }}
-                  className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 font-mono text-xs transition-colors ${
-                    isSelected
+                  className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 font-mono text-xs transition-colors ${isSelected
                       ? 'bg-theme-secondary font-semibold text-theme-text'
                       : 'text-theme-muted hover:bg-theme-secondary/70 hover:text-theme-text'
-                  }`}
+                    }`}
                   style={
                     isSelected && opt.value === 'KEEP'
                       ? { color: T.rose, background: rgba(T.rose, 0.12) }
                       : isSelected
-                      ? { color: optMeta.c }
-                      : undefined
+                        ? { color: optMeta.c }
+                        : undefined
                   }
                 >
                   <span className="flex items-center gap-2 truncate">
@@ -767,10 +764,10 @@ export default function Step3Configure() {
     try {
       eventSource = new EventSource(`/api/jobs/${jobId}/stream`);
       eventSource.addEventListener('stage', (e) => {
-        try { const d = JSON.parse(e.data); setStageProgress(d.stage, d.percent, d.message); } catch {}
+        try { const d = JSON.parse(e.data); setStageProgress(d.stage, d.percent, d.message); } catch { }
       });
       eventSource.addEventListener('log', (e) => {
-        try { addLiveLog(JSON.parse(e.data).text); } catch {}
+        try { addLiveLog(JSON.parse(e.data).text); } catch { }
       });
       eventSource.addEventListener('error', (e) => console.warn('[SSE] EventSource closed or error:', e));
     } catch (sseErr) {
@@ -1284,9 +1281,8 @@ export default function Step3Configure() {
                             initial={{ opacity: 0, y: 14, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
                             transition={{ duration: 0.3, delay: reduce ? 0 : Math.min(idx, 8) * 0.04 }}
                             whileHover={isCardDropdownOpen ? undefined : { y: -2 }}
-                            className={`relative flex flex-col justify-between gap-4 overflow-visible rounded-2xl border border-theme-border bg-theme-card p-5 pl-6 shadow-sm transition-all ${
-                              isCardDropdownOpen ? 'ring-2 ring-cyan-500/40 shadow-xl' : 'hover:shadow-md'
-                            }`}
+                            className={`relative flex flex-col justify-between gap-4 overflow-visible rounded-2xl border border-theme-border bg-theme-card p-5 pl-6 shadow-sm transition-all ${isCardDropdownOpen ? 'ring-2 ring-cyan-500/40 shadow-xl' : 'hover:shadow-md'
+                              }`}
                             style={{
                               zIndex: isCardDropdownOpen ? 70 : Math.max(1, filteredPiiColumns.length - idx),
                             }}
@@ -1347,20 +1343,19 @@ export default function Step3Configure() {
                                         setOpenActionCol(null);
                                       }}
                                       title={opt.label}
-                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono cursor-pointer transition-all ${
-                                        isCurrent
+                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono cursor-pointer transition-all ${isCurrent
                                           ? 'font-bold shadow-sm'
                                           : 'bg-theme-secondary/50 text-theme-dim hover:text-theme-text hover:bg-theme-secondary border border-theme-border/40'
-                                      }`}
+                                        }`}
                                       style={
                                         isCurrent
                                           ? {
-                                              background: rgba(optMeta.c, 0.18),
-                                              borderColor: rgba(optMeta.c, 0.6),
-                                              borderWidth: '1px',
-                                              borderStyle: 'solid',
-                                              color: optMeta.c,
-                                            }
+                                            background: rgba(optMeta.c, 0.18),
+                                            borderColor: rgba(optMeta.c, 0.6),
+                                            borderWidth: '1px',
+                                            borderStyle: 'solid',
+                                            color: optMeta.c,
+                                          }
                                           : undefined
                                       }
                                     >
