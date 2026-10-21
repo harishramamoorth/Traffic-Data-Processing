@@ -1,9 +1,12 @@
 {
-  "name": "traffic-data-processor",
+  "name": "traffic-data-processor-backend",
+  "version": "1.0.0",
+  "description": "Backend API server and Python privacy-preserving data processing engine",
   "private": true,
   "scripts": {
-    "server": "npm --prefix server run dev",
-    "client": "npm --prefix client run dev",
+    "start": "npm --prefix server start",
+    "dev": "npm --prefix server run dev",
+    "test:server": "npm --prefix server test",
     "test:processor": "python processor/main.py --input processor/sample_traffic_data.csv",
     "test:python": "pytest processor/tests"
   }

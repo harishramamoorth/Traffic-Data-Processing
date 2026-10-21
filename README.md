@@ -1,201 +1,139 @@
-# 🚦 Traffic Data Processor — Privacy-Preserving Mobility Platform
+# 🚦 Traffic Data Processor — Backend & Data Processing Engine
 
-An enterprise-grade, interview-winning data privacy and traffic telemetry platform (React 18 + Vite, Tailwind CSS, Three.js, Node.js/Express, Python 3.12+, and MongoDB). Built to ingest raw connected vehicle sensor feeds, detect Personally Identifiable Information (PII), enforce strict Data Minimization and HMAC-SHA256 pseudonymization, generalize temporal/spatial coordinates, flag physical outliers, and conduct automated quality reconciliations with **zero raw data retention**.
+Enterprise-grade, privacy-preserving mobility and traffic telemetry backend platform. Combines a high-throughput **Node.js/Express API gateway** with an advanced **Python data processing engine** (Python 3.12+ / Pandas / NumPy / SciPy / OpenPyXL) and **MongoDB** zero-retention storage.
 
----
-
-## 🌟 Highlights & Enterprise Features
-
-- **5-Step Guided Wizard**:
-  1. **Upload**: Drag-and-drop zone with animated glowing border, file validation (CSV/JSON up to 50MB), progress ring, and one-click built-in sample dataset.
-  2. **File Analysis (Pre-Flight Profiling)**: Pre-processing analysis executed entirely in volatile memory via `POST /api/jobs/profile`. Provides animated count-up KPI cards, 0–100 Data Health Score gauge, 7x24 hour-of-day heatmap matrix, speed histogram, coordinate scatter, null rate bars, and sparkline distribution columns.
-  3. **Configure (Privacy & Rules Engine)**: Live trade-off scoring comparing **Privacy Score vs. Data Utility Score** in real-time. Features 3 production presets (*Maximum Privacy*, *Balanced (Recommended)*, *Max Utility*), GPS precision slider (0–4 decimals), 15-minute floor bucketing, outlier handling options, and an in-memory 5-row live transformation preview.
-  4. **Processing (Live Pipeline)**: Interactive 3D particle data stream in sync with real-time pipeline milestones (Load &rarr; Detect PII &rarr; Clean &rarr; Anonymize &rarr; Quality Audits &rarr; Export). Real-time Server-Sent Events (SSE) log stream terminal.
-  5. **Results & Verification**: Interactive Recharts telemetry (QC pass/warn/fail donut, privacy actions, null % before vs. after, speed histogram, road segments), draggable split Before/After comparison with "Session Only — Never Stored" guarantee, and multi-format exports (CSV, JSON, Audit Markdown report, JSON config).
-- **Supported Formats**: `.csv`, `.tsv`, `.txt` (delimiter auto-detected), `.json`, and Excel (`.xlsx`, `.xls` with multi-sheet selector and password-protection detection).
-- **Security & Data Hygiene**:
-  - Spreadsheet formula injection protection (neutralizing leading `=`, `+`, `-`, `@`, `\t`, `\r` on CSV exports).
-  - Cryptographic HMAC-SHA256 with domain separation to eliminate cross-column pseudonym correlation.
-  - Mandatory 32-character secret key configuration without hardcoded fallbacks.
-  - Zero raw data retention: staging files unlinked immediately in controller `finally` blocks; zero raw identifiers stored in MongoDB.
-- **K-Anonymity & Risk Reduction Engine**:
-  - `None` (Report only): Audits equivalence classes and reports risk distribution without removing records.
-  - `Suppress K` ($K \ge 3$): Iterative generalization (GPS decimal rounding, 15m $\rightarrow$ 60m time bucketing) and row suppression for solitary cohorts ($k < K$).
-  - `Aggregate`: Produces hourly road segment macro statistics with speed statistics, congestion, and outlier counts with zero microdata.
-- **Transparent Privacy & Utility Scoring**:
-  - Deterministic 0–100 trade-off scores based on remaining direct identifiers, spatial resolution, temporal windowing, and k-anonymity suppression.
-  - Clearly documented as analytical estimates, avoiding misleading claims of absolute anonymity.
+Ingests connected vehicle sensor feeds, detects Personally Identifiable Information (PII), enforces strict Data Minimization and HMAC-SHA256 pseudonymization, generalizes coordinates/temporal stamps, conducts 9 automated quality audits (QC-01 to QC-09), and streams live pipeline telemetry via Server-Sent Events (SSE).
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ Architecture & Components
 
 ```mermaid
 flowchart TD
-    User([Traffic Data Operator]) -->|Uploads CSV / TSV / TXT / JSON / XLSX| Client[React 18 + Vite + Tailwind\n:5173]
-    Client -->|POST /api/jobs/profile| Profiler[In-Memory Profiler\nZero Disk Retention]
-    Profiler -->|Returns Stats & Heatmap| Client
-    Client -->|POST /api/jobs/upload\nwith Config JSON| Server[Node.js + Express API\n:5000]
+    Client([Frontend Client / API Consumer]) -->|POST /api/jobs/profile| Express[Node.js Express API Server\n:5000]
+    Client -->|POST /api/jobs/upload| Express
+    Client -->|GET /api/jobs/:id/stream| SSE[Server-Sent Events Stream]
 
-    subgraph Server-Sent Events & Engine
-        Server -->|GET /api/jobs/:id/stream| SSE[jobStreamService\nLive Progress & Logs]
-        Server -->|Spawn with HASH_SECRET| PyRunner[services/pythonRunner.js]
-        PyRunner --> Main[processor/main.py]
-        Main --> Inspect[inspect_data.py]
-        Main --> Detect[detect_pii.py]
-        Main --> Clean[clean.py]
-        Main --> Anon[anonymize.py]
-        Main --> QC[quality_checks.py (QC-01 to QC-09)]
+    subgraph Backend Orchestration
+        Express --> PyRunner[services/pythonRunner.js]
+        PyRunner -->|CLI Spawn with HASH_SECRET| Engine[processor/main.py]
     end
 
-    subgraph Zero-Retention Storage
-        QC -->|Anonymized Records Only| MongoRecords[(MongoDB 'records' Collection)]
-        QC -->|Audit Metadata & Telemetry| MongoJobs[(MongoDB 'jobs' Collection)]
-        Server -.->|finally block: unlinkSync| Cleanup[(Delete Staged Temp File)]
+    subgraph Python Processing Engine
+        Engine --> Profile[profile_data.py (In-Memory Pre-Flight)]
+        Engine --> Inspect[inspect_data.py (Schema & Quality)]
+        Engine --> Detect[detect_pii.py (Regex & Heuristics)]
+        Engine --> Clean[clean.py (Sanitization & Outliers)]
+        Engine --> Anon[anonymize.py (HMAC-SHA256, Generalization, K-Anonymity)]
+        Engine --> QC[quality_checks.py (QC-01 to QC-09 Reconciliations)]
     end
 
-    SSE -.->|Live Stage Events| Client
-    Server -->|Memory-Only Before vs After Sample| Client
+    subgraph Zero-Retention Database
+        QC -->|Cleaned Anonymized Records| MongoRecords[(MongoDB 'records')]
+        QC -->|Audit Logs & Metrics| MongoJobs[(MongoDB 'jobs')]
+        Express -.->|finally: unlinkSync| TempCleanup[(Delete Staged Temp Files)]
+    end
+
+    SSE -.->|Real-time Stage Progress| Client
 ```
 
----
-
-## 🔒 Privacy Safeguards & Engineering Rules
-
-1. **Zero Raw Retention**: Raw data is never persisted in MongoDB or stored on disk. Staging temp files are unlinked in a `finally` block immediately after profiling and processing.
-2. **Volatile Before/After Comparison**: The side-by-side comparison of original vs. anonymized values exists solely in volatile memory during the active upload session. After page refresh, only anonymized records remain.
-3. **HMAC-SHA256 Pseudonymization with Domain Separation**: Identifiers and plates are transformed deterministically using a secret key (`process.env.HASH_SECRET`) into `ANON_<first 12 hex chars>`. Incorporating column context prevents cross-column linkage correlation attacks.
-4. **Data Minimization**: Direct personal identifiers (`driver_name`, `driver_ssn`, `phone`, `email`, `credit_card`) are completely dropped from the dataset schema.
-5. **Spatial & Temporal Generalization**: GPS coordinates are rounded to 2 decimal places ($\approx 1.1\text{ km}$ spatial bounding box), and timestamps are floored into uniform UTC intervals (5m, 15m, 30m, 60m).
-6. **Non-Clamping Outlier Flagging**: High speeds are not altered or clamped. The pipeline sets `speed_outlier_flag = true`, preserving dataset veracity. Impossible speeds ($<0$ or $>250\text{ mph}$) are nullified with the flag set.
-7. **Free-Text Redaction**: Unstructured text fields are scanned with regexes and lazy-loaded multilingual spaCy NER, scrubbing incidental phone numbers, plates, Emirates IDs, and personal names.
-8. **CSV Formula Injection Defense**: Output CSV serialization neutralizes spreadsheet formula execution commands (`=`, `+`, `-`, `@`, `\t`, `\r`) by prepending a single quote to non-numeric strings.
+### Components:
+- **`server/`**: Express API server handling authentication, upload staging, rate limiting, MongoDB persistence, SSE job streaming, and process orchestration.
+- **`processor/`**: Core mathematical, statistical, and privacy transformation pipeline executing PII scanning, K-Anonymity generalization/suppression, HMAC masking, and data quality verification.
+- **`docs/`**: API specifications and methodology references.
 
 ---
 
-## ⚡ Automated Quality Audit Battery (QC-01 to QC-09)
+## 🔒 Privacy & Compliance Features
 
-| Check ID | Verification Assertion | Pass Condition |
-| :--- | :--- | :--- |
-| **QC-01** | Record Count Reconciliation | $\text{Input Rows} = \text{Output Rows} + \text{Rejected Rows} + \text{Duplicates Removed} + \text{Suppressed Rows}$ (zero silent loss) |
-| **QC-02** | Schema Completeness | All non-PII dimensions preserved; direct PII minimized |
-| **QC-03** | Zero Raw PII Leakage | Independent re-scan confirms 0 raw SSNs, emails, phone numbers, or cards in output |
-| **QC-04** | Physical Value Ranges | Verified velocity bounds ($[0, 250]$ mph); impossible values nullified |
-| **QC-05** | Generalization Audit | Confirmed GPS coordinates $\le 2$ decimal places; timestamps floored to configured bucket |
-| **QC-06** | Plate Pseudonym Consistency | Same plate yields identical `ANON_` hash; standard format verified |
-| **QC-07** | Duplicate Absence Check | Zero duplicate rows detected in cleaned output dataset |
-| **QC-08** | Column Null Rate Thresholds | Analytical column missingness complies with healthy data quality limits |
-| **QC-09** | K-Anonymity Risk Assessment | Verified cohort distribution over detected quasi-identifiers ($k \ge K$) |
+- **HMAC-SHA256 Pseudonymization**: Domain-separated salted cryptographic hashing for vehicle IDs, driver IDs, VINs, and MAC addresses.
+- **Spatial & Temporal Generalization**: Configurable GPS coordinate rounding (0–4 decimal places) and 15-minute / 60-minute interval bucketing.
+- **K-Anonymity Engine ($K \ge 3$)**:
+  - `None`: Risk audit reporting without record removal.
+  - `Suppress K`: Iterative generalization with row suppression for equivalence classes where $k < K$.
+  - `Aggregate`: Cohort-level macro statistics with speed percentiles and zero raw microdata retention.
+- **Zero Raw Data Retention**: Staged uploaded files are unlinked in memory and on disk immediately upon pipeline execution; raw PII is never stored in MongoDB.
+- **Spreadsheet Formula Injection Defense**: Sanitizes leading `=, +, -, @, \t, \r` on all export outputs.
 
 ---
 
-## 🛠️ Environment Variables Configuration
+## 🚀 Getting Started
 
-Create a `.env` file in `server/`:
+### Prerequisites
+
+- **Node.js**: v18+ & npm
+- **Python**: v3.10+ (v3.12 recommended)
+- **MongoDB**: v6.0+ (local instance or MongoDB Atlas)
+
+### 1. Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/harishramamoorth/Traffic-Data-Processing-Backend.git
+cd Traffic-Data-Processing-Backend
+
+# Install Node.js API dependencies
+cd server
+npm install
+cd ..
+
+# Set up Python environment & dependencies
+cd processor
+pip install -r requirements.txt
+cd ..
+```
+
+### 2. Environment Configuration
+
+Create a `.env` file in the root or `server/` directory:
 
 ```env
 PORT=5000
 NODE_ENV=development
-CLIENT_ORIGIN=http://localhost:5173
-
-# Cryptographic Pseudonymization Secret (Minimum 32 characters, keep private!)
-HASH_SECRET=your_super_secret_hmac_key_min_32_characters_here
-
-# Python Runtime Executable
-PYTHON_PATH=python
-
-# Python processing timeout (milliseconds; default: 5 minutes)
-PYTHON_PROCESS_TIMEOUT_MS=300000
-
-# Storage Directories
-UPLOAD_DIR=./uploads
-PROCESSED_DIR=./processed
-
-# MongoDB Connection
 MONGODB_URI=mongodb://localhost:27017/traffic_processor
+HASH_SECRET=your_minimum_32_character_secret_key_here
+PYTHON_PATH=python
+CORS_ORIGIN=http://localhost:5173
+PYTHON_PROCESS_TIMEOUT_MS=120000
 ```
+
+### 3. Run the Backend Server
+
+```bash
+# Start API in development mode (with hot reloading)
+npm run dev
+
+# Or start directly
+npm start
+```
+
+The API server will listen at `http://localhost:5000`.
 
 ---
 
-## 🚀 Quick Start Guide
-
-### 1. Prerequisites
-- Node.js v18+ & npm
-- Python 3.10+ with pip
-- MongoDB running locally on port `27017`
-
-### 2. Install Dependencies
-```powershell
-# Python Processor
-cd processor
-python -m pip install -r requirements.txt
-
-# Express Backend
-cd ../server
-npm install
-
-# React Frontend
-cd ../client
-npm install
-```
-
-### 3. Run Test Suites
-```powershell
-# Run Python Pipeline Tests (32/32)
-pytest processor/tests
-
-# Run React Client Tests (11/11)
-cd client
-npm test
-
-# Run Server Integration Tests (13/13)
-cd ../server
-npm test
-```
-
-### 4. Build Client Bundle
-```powershell
-cd client
-npm run build
-```
-
-### 5. Launch the Application
-```powershell
-# Windows 1-Click Launch:
-.\start.bat
-
-# Or run services separately:
-# Terminal 1 (Backend):
-cd server && npm run dev
-
-# Terminal 2 (Frontend):
-cd client && npm run dev
-```
-
-Visit the dashboard at `http://localhost:5173`.
-
----
-
-## 📡 API Endpoints Reference
+## 📡 API Endpoints
 
 | Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/jobs/profile` | In-memory pre-processing file analysis (nulls, types, PII, outliers, health score) |
-| `POST` | `/api/jobs/upload` | Multipart file upload with dynamic config JSON, runs pipeline, deletes temp file in `finally` |
-| `GET` | `/api/jobs/:id/stream` | Server-Sent Events (SSE) live progress and execution log streaming |
-| `GET` | `/api/jobs/:id/analytics` | Pre-aggregated Recharts analytics payload (QC donut, speed histogram, null bars) |
-| `GET` | `/api/jobs` | Paginated jobs directory with `page`, `limit`, `search`, and `status` filters |
-| `GET` | `/api/jobs/:id` | Detailed job audit telemetry (metadata, PII report, QC checks, rejection log) |
-| `GET` | `/api/jobs/:id/records` | Paginated anonymized records with `page`, `limit`, `sort`, `order`, `filter` |
-| `GET` | `/api/jobs/:id/download` | Downloads cleaned dataset (`?format=csv` or `?format=json` or `?type=aggregate`) |
-| `GET` | `/api/jobs/:id/aggregated.csv` | Direct shortcut to download aggregated macro statistics dataset |
-| `GET` | `/api/jobs/:id/report` | Downloadable compliance audit report (`?format=markdown` or `json`) |
-| `DELETE` | `/api/jobs/:id` | Deletes job metadata and associated anonymized records from MongoDB |
-| `GET` | `/api/health` | Health status and runtime telemetry |
+|---|---|---|
+| `GET` | `/api/health` | Healthcheck and service status |
+| `POST` | `/api/jobs/profile` | In-memory dataset pre-flight profiling (zero retention) |
+| `POST` | `/api/jobs/upload` | Upload dataset and trigger privacy pipeline |
+| `GET` | `/api/jobs/:id/stream` | Server-Sent Events (SSE) live progress & log feed |
+| `GET` | `/api/jobs` | Paginated job history with audit summaries |
+| `GET` | `/api/jobs/:id` | Full job audit report, QC results, and metrics |
+| `GET` | `/api/jobs/:id/export` | Download processed results (.csv, .json, config) |
 
 ---
 
-## ⚠️ Limitations & Governance Notice
-1. **Pseudonym Linkability**: HMAC pseudonymization is deterministic. An adversary possessing the secret key or auxiliary side-channel observations can re-identify records. Pseudonymized data remains pseudonymous and is not legally equivalent to fully anonymous non-personal data.
-2. **Heuristic Detection**: Detection rules rely on patterns, keywords, and named-entity recognition. No automated scanner can guarantee 100% detection of novel, obfuscated, or unstructured personal data. Manual review of flagged columns is recommended.
-3. **No Compliance Warranty**: This software provides privacy-enhancing engineering mechanisms. It does not constitute legal advice or guarantee statutory compliance with GDPR, CCPA, or UAE Federal Decree-Law No. 45 of 2021.
+## 🧪 Testing
+
+```bash
+# Run Express API unit and integration tests
+npm run test:server
+
+# Run Python processor tests
+npm run test:python
+
+# Run processor on sample data
+npm run test:processor
+```
