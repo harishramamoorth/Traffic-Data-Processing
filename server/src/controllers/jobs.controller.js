@@ -292,7 +292,13 @@ export const jobsController = {
         }
       }
 
-      const records = await db.getAllRecordsForJob(id);
+      let records = await db.getAllRecordsForJob(id);
+      if ((!records || records.length === 0) && Array.isArray(job.cleanedRecords) && job.cleanedRecords.length > 0) {
+        records = job.cleanedRecords;
+      }
+      if ((!records || records.length === 0) && Array.isArray(job.records) && job.records.length > 0) {
+        records = job.records;
+      }
       const safeFilename = `anonymized-traffic-${id}`;
 
       if (format === 'json') {
