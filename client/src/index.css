@@ -7,8 +7,54 @@
    Themes: Midnight (default), Aurora, Matrix, Light Pro, High Contrast
    ========================================================================== */
 
-/* 1. Midnight (Dark Navy + Cyan Accent) - Default */
+/* 1. Light Theme (Clean High-Contrast Studio Light) - Default */
 :root,
+[data-theme="light-pro"],
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #edf2f7;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --border-subtle: #e2e8f0;
+  --border-focus: #2563eb;
+
+  --text-main: #0f172a;
+  --text-muted: #334155;
+  --text-dim: #64748b;
+
+  --accent-primary: #2563eb;
+  --accent-secondary: #0284c7;
+  --accent-emerald: #059669;
+  --accent-amber: #d97706;
+  --accent-rose: #e11d48;
+  --accent-glow: rgba(37, 99, 235, 0.16);
+  --grid-color: rgba(15, 23, 42, 0.04);
+
+  /* Consistent Status Colors */
+  --status-passed: #059669;
+  --status-passed-bg: rgba(5, 150, 105, 0.12);
+  --status-warning: #d97706;
+  --status-warning-bg: rgba(217, 119, 6, 0.12);
+  --status-failed: #e11d48;
+  --status-failed-bg: rgba(225, 29, 72, 0.12);
+  --status-not-assessed: #64748b;
+  --status-not-assessed-bg: rgba(100, 116, 139, 0.12);
+
+  /* Spacing Scale (4/8/12/16/24/32) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Consistent Card Tokens */
+  --card-radius: 1rem;
+  --card-border: var(--border-subtle);
+  --card-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.04);
+}
+
+/* 2. Midnight (Dark Navy + Cyan Accent) */
 [data-theme="midnight"] {
   --bg-primary: #070b14;
   --bg-secondary: #0d1527;
@@ -39,17 +85,6 @@
   --status-not-assessed: #94a3b8;
   --status-not-assessed-bg: rgba(148, 163, 184, 0.15);
 
-  /* Spacing Scale (4/8/12/16/24/32) */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-
-  /* Consistent Card Tokens */
-  --card-radius: 1rem;
-  --card-border: var(--border-subtle);
   --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
 }
 
