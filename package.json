@@ -4,6 +4,8 @@
   "description": "Backend API server and Python privacy-preserving data processing engine",
   "private": true,
   "scripts": {
+    "build": "npm --prefix server install && (pip install -r processor/requirements.txt || pip3 install -r processor/requirements.txt || true)",
+    "postinstall": "npm --prefix server install",
     "start": "npm --prefix server start",
     "dev": "npm --prefix server run dev",
     "test:server": "npm --prefix server test",
