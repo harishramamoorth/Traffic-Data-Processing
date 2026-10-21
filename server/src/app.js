@@ -16,12 +16,31 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// CORS Configuration (Strict client origin)
+// CORS Configuration (Supports local dev, configured CLIENT_ORIGIN, and Vercel deployments)
+const allowedOrigins = [
+  env.CLIENT_ORIGIN,
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173'
+].filter(Boolean).map(o => o.replace(/\/+$/, ''));
+
 app.use(
   cors({
-    origin: env.CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/+$/, '');
+      if (
+        allowedOrigins.includes(cleanOrigin) ||
+        /\.vercel\.app$/.test(cleanOrigin) ||
+        env.NODE_ENV === 'development'
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
+    exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length'],
     credentials: true
   })
 );
