@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 
 export const THEMES = [
+  { id: 'light-pro', name: 'Light Pro', accent: '#2563eb', desc: 'Clean white + royal blue' },
   { id: 'midnight', name: 'Midnight', accent: '#06b6d4', desc: 'Dark navy + cyan accent' },
   { id: 'aurora', name: 'Aurora', accent: '#ec4899', desc: 'Dark + purple/pink gradient' },
   { id: 'matrix', name: 'Matrix', accent: '#22c55e', desc: 'Black + green terminal feel' },
-  { id: 'light-pro', name: 'Light Pro', accent: '#2563eb', desc: 'Clean white + royal blue' },
   { id: 'high-contrast', name: 'High Contrast', accent: '#ffff00', desc: 'Pure black + yellow contrast' }
 ];
 
@@ -25,7 +25,7 @@ const setStorage = (key, val) => {
   } catch {}
 };
 
-const savedTheme = getStorage('tdp_theme', 'midnight');
+const savedTheme = getStorage('tdp_theme', 'light-pro');
 const savedAnim = getStorage('tdp_anim_level', 'full');
 
 // Apply initial theme attribute to <html> element
@@ -76,8 +76,10 @@ export const useThemeStore = create((set, get) => ({
       case 'high-contrast':
         return { primary: '#ffff00', secondary: '#00ffff', bg: '#000000', card: '#121212' };
       case 'midnight':
-      default:
         return { primary: '#06b6d4', secondary: '#3b82f6', bg: '#0a0e17', card: '#111827' };
+      case 'light-pro':
+      default:
+        return { primary: '#2563eb', secondary: '#0284c7', bg: '#f8fafc', card: '#ffffff' };
     }
   }
 }));
