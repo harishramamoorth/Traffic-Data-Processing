@@ -16,6 +16,7 @@ import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { useToast } from '../Toast';
 import PageLoader from '../PageLoader';
 import AuraKpiCards from '../3d/AuraKpiCards';
+import { downloadFile } from '../../utils/downloader';
 
 /* ────────────────────────────────────────────────────────────────
    THEME LAYER
@@ -884,22 +885,44 @@ export default function Step5Results() {
   };
 
   /* downloads */
-  const save = (href, name, msg) => {
-    addToast(msg, 'info');
-    const a = document.createElement('a');
-    a.href = href; a.download = name;
-    document.body.appendChild(a); a.click();
-    setTimeout(() => a.remove(), 250);
+  const dl = (format, type = 'row') => {
+    const filename = type === 'aggregate' ? `aggregated.${format}` : `cleaned_${jobId}.${format}`;
+    const fallbackData = type === 'aggregate'
+      ? (job.aggregatedRecords || [])
+      : (records && records.length > 0 ? records : (sessionSample?.after || []));
+
+    downloadFile({
+      url: `/api/jobs/${jobId}/download?format=${format}&type=${type}`,
+      filename,
+      fallbackData,
+      fallbackType: format,
+      onToast: addToast
+    });
   };
-  const dl = (format, type = 'row') => save(
-    `/api/jobs/${jobId}/download?format=${format}&type=${type}`,
-    type === 'aggregate' ? `aggregated.${format}` : `cleaned_${jobId}.${format}`,
-    `Downloading ${type === 'aggregate' ? 'aggregated' : 'cleaned'} dataset (.${format})…`
-  );
-  const dlReport = (format = 'markdown') => save(
-    `/api/jobs/${jobId}/report?format=${format}`,
-    `audit_report_${jobId}.${format === 'markdown' ? 'md' : 'json'}`, 'Downloading audit report…'
-  );
+
+  const dlReport = (format = 'markdown') => {
+    const filename = `audit_report_${jobId}.${format === 'markdown' ? 'md' : 'json'}`;
+    const fallbackData = format === 'markdown'
+      ? job
+      : {
+          jobId,
+          filename: originalFilename,
+          status: job.status,
+          completedAt,
+          summary,
+          qualityChecks,
+          piiReport,
+          kAnonymity: kAnon
+        };
+
+    downloadFile({
+      url: `/api/jobs/${jobId}/report?format=${format}`,
+      filename,
+      fallbackData,
+      fallbackType: format === 'markdown' ? 'report_md' : 'report_json',
+      onToast: addToast
+    });
+  };
   const dlConfig = () => {
     addToast('Downloading pipeline config…', 'info');
     const url = URL.createObjectURL(new Blob([JSON.stringify({ jobId, processedAt: completedAt, summary, rules: job.config || {} }, null, 2)], { type: 'application/json' }));

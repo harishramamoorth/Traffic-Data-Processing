@@ -1,8 +1,39 @@
 import React from 'react';
-import { trafficApi } from '../api/client';
+import { downloadFile } from '../utils/downloader';
+import { useToast } from './Toast';
 
 export default function DownloadsTab({ job }) {
+  const { addToast } = useToast();
   if (!job) return null;
+
+  const handleDownload = (format, type = 'row') => {
+    const filename = type === 'aggregate'
+      ? `aggregated.${format}`
+      : `cleaned_${job.id}.${format}`;
+
+    const fallbackData = type === 'aggregate'
+      ? (job.aggregatedRecords || [])
+      : (job.records || job.cleanedRecords || []);
+
+    downloadFile({
+      url: `/api/jobs/${job.id}/download?format=${format}&type=${type}`,
+      filename,
+      fallbackData,
+      fallbackType: format,
+      onToast: addToast
+    });
+  };
+
+  const handleDownloadReport = (format = 'markdown') => {
+    const filename = `audit_report_${job.id}.${format === 'markdown' ? 'md' : 'json'}`;
+    downloadFile({
+      url: `/api/jobs/${job.id}/report?format=${format}`,
+      filename,
+      fallbackData: job,
+      fallbackType: format === 'markdown' ? 'report_md' : 'report_json',
+      onToast: addToast
+    });
+  };
 
   return (
     <div className="glass-panel" style={{ padding: '2rem' }}>
@@ -31,14 +62,14 @@ export default function DownloadsTab({ job }) {
               Standardized CSV with HMAC-SHA256 pseudonyms, 15-min temporal buckets, and removed direct PII.
             </p>
           </div>
-          <a
-            href={trafficApi.downloadUrl(job.id, 'csv')}
-            download
+          <button
+            type="button"
+            onClick={() => handleDownload('csv', 'row')}
             className="btn-primary"
-            style={{ width: '100%', textAlign: 'center' }}
+            style={{ width: '100%', textAlign: 'center', cursor: 'pointer' }}
           >
             Download CSV
-          </a>
+          </button>
         </div>
 
         {/* JSON Export */}
@@ -60,14 +91,14 @@ export default function DownloadsTab({ job }) {
               Structured JSON payload optimized for mobility APIs, GIS layers, and cloud data warehouses.
             </p>
           </div>
-          <a
-            href={trafficApi.downloadUrl(job.id, 'json')}
-            download
+          <button
+            type="button"
+            onClick={() => handleDownload('json', 'row')}
             className="btn-primary"
-            style={{ width: '100%', textAlign: 'center' }}
+            style={{ width: '100%', textAlign: 'center', cursor: 'pointer' }}
           >
             Download JSON
-          </a>
+          </button>
         </div>
 
         {/* Markdown Audit Report */}
@@ -89,14 +120,14 @@ export default function DownloadsTab({ job }) {
               Complete compliance attestation with QC-01 to QC-08 assertions and rejection reconciliation.
             </p>
           </div>
-          <a
-            href={trafficApi.reportUrl(job.id, 'markdown')}
-            download
+          <button
+            type="button"
+            onClick={() => handleDownloadReport('markdown')}
             className="btn-secondary"
-            style={{ width: '100%', textAlign: 'center' }}
+            style={{ width: '100%', textAlign: 'center', cursor: 'pointer' }}
           >
             Download Report (.md)
-          </a>
+          </button>
         </div>
 
         {/* Aggregated Dataset (k-anonymized) */}
@@ -119,14 +150,14 @@ export default function DownloadsTab({ job }) {
                 Hourly road segment statistics (counts, speeds, congestion, outliers). Zero microdata, k ≥ {job.config?.kThreshold ?? 3}.
               </p>
             </div>
-            <a
-              href={`/api/jobs/${job.id}/download?type=aggregate`}
-              download
+            <button
+              type="button"
+              onClick={() => handleDownload('csv', 'aggregate')}
               className="btn-primary"
-              style={{ width: '100%', textAlign: 'center', background: '#10b981', borderColor: '#10b981' }}
+              style={{ width: '100%', textAlign: 'center', background: '#10b981', borderColor: '#10b981', cursor: 'pointer' }}
             >
               Download Aggregated CSV
-            </a>
+            </button>
           </div>
         )}
       </div>
