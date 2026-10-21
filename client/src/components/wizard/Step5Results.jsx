@@ -344,11 +344,10 @@ function RiskFunnel({ groups, before, after, K }) {
                 animate={{ y: on ? -10 : 0 }}
                 transition={{ type: 'spring', stiffness: 380, damping: 28 }}
                 style={{ '--t': s.color }}
-                className={`relative flex flex-col rounded-xl text-left overflow-hidden transition-[background,box-shadow,border-color] duration-200 ${
-                  on
+                className={`relative flex flex-col rounded-xl text-left overflow-hidden transition-[background,box-shadow,border-color] duration-200 ${on
                     ? 'border border-theme-border bg-theme-card/90 backdrop-blur-md shadow-2xl ring-1 ring-white/15'
                     : 'border border-transparent bg-theme-secondary/20 hover:bg-theme-secondary/40'
-                }`}
+                  }`}
               >
                 {/* Active column light sheen sweep */}
                 {on && !reduce && (
@@ -380,7 +379,7 @@ function RiskFunnel({ groups, before, after, K }) {
                           <stop offset="100%" style={{ stopColor: s.color, stopOpacity: 0.08 }} />
                         </linearGradient>
                         <filter id={`${uid}-glow`} x="-20%" y="-20%" width="140%" height="140%">
-                          <feDropShadow dx="0" dy="0" stdDeviation="2.5" floodColor={s.color} floodOpacity="0.85"/>
+                          <feDropShadow dx="0" dy="0" stdDeviation="2.5" floodColor={s.color} floodOpacity="0.85" />
                         </filter>
                       </defs>
 
@@ -488,7 +487,7 @@ function RiskFunnel({ groups, before, after, K }) {
                       >
                         {/* Specular glass reflection */}
                         <span className="absolute top-1 left-2 h-2.5 w-2.5 rounded-full bg-white/70 blur-[0.5px]" />
-                        
+
                         {/* Inner luminous core */}
                         <span
                           className="h-3 w-3 rounded-full shadow-sm"
@@ -579,7 +578,7 @@ export default function Step5Results() {
     if (fired.current || reduce || !activeJob) return;
     if (activeJob.status === 'COMPLETED' || activeJob.summary?.overall_status === 'PASSED') {
       fired.current = true;
-      try { confetti({ particleCount: 60, spread: 70, origin: { y: 0.55 } }); } catch {}
+      try { confetti({ particleCount: 60, spread: 70, origin: { y: 0.55 } }); } catch { }
     }
   }, [activeJob, reduce]);
 
@@ -631,7 +630,7 @@ export default function Step5Results() {
   const status = kOk && !hasFail ? 'PASSED' : risk === 'HIGH' && rawStatus === 'PASSED' ? 'PASSED_WITH_WARNINGS' : rawStatus;
   const st = status === 'PASSED' ? { t: 'ok', Icon: CheckCircle2, label: 'Ready to use', copy: 'Your cleaned dataset is ready. Download it below or review the audit.' }
     : status === 'FAILED' ? { t: 'bad', Icon: XCircle, label: 'Action required', copy: 'Some checks failed. Fix them in settings before using this output.' }
-    : { t: 'warn', Icon: AlertTriangle, label: 'Review recommended', copy: 'Processing finished with items to review before you share the output.' };
+      : { t: 'warn', Icon: AlertTriangle, label: 'Review recommended', copy: 'Processing finished with items to review before you share the output.' };
 
   const nonPassing = qualityChecks.filter((q) => q.status !== 'PASS');
   const passed = qualityChecks.length - nonPassing.length;
@@ -833,10 +832,10 @@ export default function Step5Results() {
       try {
         eventSource = new EventSource(`/api/jobs/${newJobId}/stream`);
         eventSource.addEventListener('stage', (e) => {
-          try { const d = JSON.parse(e.data); setStageProgress(d.stage, d.percent, d.message); } catch {}
+          try { const d = JSON.parse(e.data); setStageProgress(d.stage, d.percent, d.message); } catch { }
         });
         eventSource.addEventListener('log', (e) => {
-          try { addLiveLog(JSON.parse(e.data).text); } catch {}
+          try { addLiveLog(JSON.parse(e.data).text); } catch { }
         });
         eventSource.addEventListener('error', (e) => console.warn('[SSE] EventSource closed or error:', e));
       } catch (sseErr) {
@@ -910,18 +909,24 @@ export default function Step5Results() {
   /* navigation */
   const NAV = [
     { id: 'overview', label: 'Overview', icon: Award, badge: status === 'PASSED' ? 'Passed' : status === 'FAILED' ? 'Fail' : 'Warn', t: st.t },
-    { id: 'privacy', label: 'Privacy', icon: Shield, badge: risk, t: tone(risk), subs: [
-      { id: 'k_anonymity', label: 'Re-ID risk', icon: Shield, badge: risk },
-      { id: 'pii_report', label: 'PII actions', icon: ShieldCheck, badge: `${piiReport.length}` }] },
-    { id: 'quality', label: 'Quality', icon: CheckCircle2, badge: qcText, t: nonPassing.length ? (hasFail ? 'bad' : 'warn') : 'ok', subs: [
-      { id: 'quality_checks', label: 'Checks', icon: CheckCircle2, badge: qcText },
-      { id: 'data_quality', label: 'Nulls', icon: Table, badge: `${nulls.length}` },
-      { id: 'rejected_rows', label: 'Rejected', icon: AlertTriangle, badge: `${rejectedRows.length}` },
-      { id: 'audit_log', label: 'Log', icon: Terminal, badge: `${processingLogs.length}` }] },
+    {
+      id: 'privacy', label: 'Privacy', icon: Shield, badge: risk, t: tone(risk), subs: [
+        { id: 'k_anonymity', label: 'Re-ID risk', icon: Shield, badge: risk },
+        { id: 'pii_report', label: 'PII actions', icon: ShieldCheck, badge: `${piiReport.length}` }]
+    },
+    {
+      id: 'quality', label: 'Quality', icon: CheckCircle2, badge: qcText, t: nonPassing.length ? (hasFail ? 'bad' : 'warn') : 'ok', subs: [
+        { id: 'quality_checks', label: 'Checks', icon: CheckCircle2, badge: qcText },
+        { id: 'data_quality', label: 'Nulls', icon: Table, badge: `${nulls.length}` },
+        { id: 'rejected_rows', label: 'Rejected', icon: AlertTriangle, badge: `${rejectedRows.length}` },
+        { id: 'audit_log', label: 'Log', icon: Terminal, badge: `${processingLogs.length}` }]
+    },
     { id: 'charts', label: 'Analytics', icon: BarChart3 },
-    { id: 'data', label: 'Data', icon: Table, subs: [
-      { id: 'records', label: 'Records', icon: Table, badge: rowsOut.toLocaleString() },
-      { id: 'before_after', label: 'Before vs after', icon: Columns }] },
+    {
+      id: 'data', label: 'Data', icon: Table, subs: [
+        { id: 'records', label: 'Records', icon: Table, badge: rowsOut.toLocaleString() },
+        { id: 'before_after', label: 'Before vs after', icon: Columns }]
+    },
     { id: 'downloads', label: 'Downloads', icon: Download }
   ];
   const owner = (id) => NAV.find((n) => n.id === id || n.subs?.some((s) => s.id === id)) || NAV[0];
@@ -947,13 +952,15 @@ export default function Step5Results() {
   const nullCols = [
     { key: 'column', label: 'Column', render: (r) => <b className="text-theme-text">{r.column}</b> },
     { key: 'count', label: 'Nulls', render: (r) => `${r.count} / ${r.total}` },
-    { key: 'pct', label: 'Missing', render: (r) => (
-      <span className="flex items-center gap-2">
-        <span className="h-1.5 w-20 overflow-hidden rounded-full bg-theme-secondary">
-          <motion.span className={`block h-full t-${r.pct > 20 ? 'bad' : r.pct > 0 ? 'warn' : 'ok'}`} style={{ background: 'var(--t)' }}
-            initial={{ width: 0 }} animate={{ width: `${Math.min(100, r.pct)}%` }} transition={{ duration: 0.7 }} />
-        </span>{r.pct}%
-      </span>) },
+    {
+      key: 'pct', label: 'Missing', render: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-20 overflow-hidden rounded-full bg-theme-secondary">
+            <motion.span className={`block h-full t-${r.pct > 20 ? 'bad' : r.pct > 0 ? 'warn' : 'ok'}`} style={{ background: 'var(--t)' }}
+              initial={{ width: 0 }} animate={{ width: `${Math.min(100, r.pct)}%` }} transition={{ duration: 0.7 }} />
+          </span>{r.pct}%
+        </span>)
+    },
     { key: 'status', label: 'Status', render: (r) => r.count === 0 ? <Chip t="ok">Complete</Chip> : <Chip t="a">Kept as null</Chip> }
   ];
   const cell = (v) => String(v).startsWith('ANON_') ? <b className="tx t-a">{v}</b> : v === true ? <b className="tx t-warn">true</b> : String(v);
@@ -1706,7 +1713,7 @@ export default function Step5Results() {
               </div>}>
               {recLoading ? <PageLoader variant="minimal" title="Loading records…" />
                 : records.length === 0 ? <p className="py-10 text-center text-xs text-theme-dim">No records stored for this job.</p>
-                : <DataTable rows={records} cols={Object.keys(records[0]).map((k) => ({ key: k, label: k, render: (r) => cell(r[k]) }))} />}
+                  : <DataTable rows={records} cols={Object.keys(records[0]).map((k) => ({ key: k, label: k, render: (r) => cell(r[k]) }))} />}
             </Section>
           )}
 
