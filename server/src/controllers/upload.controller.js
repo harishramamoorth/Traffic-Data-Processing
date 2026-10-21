@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { db } from '../config/db.js';
 import { createJob } from '../models/Job.js';
 import { runPythonProcessor, runPythonProfiler } from '../services/pythonRunner.js';
@@ -19,7 +20,7 @@ export const uploadController = {
       return res.status(400).json({ success: false, error: 'No dataset file provided for profiling.' });
     }
 
-    const tempFilePath = req.file ? req.file.path : null;
+    const tempFilePath = req.file ? path.resolve(req.file.path) : null;
     const sheet = req.body.sheet || req.query.sheet || null;
 
     try {
@@ -31,7 +32,7 @@ export const uploadController = {
       });
     } catch (err) {
       console.error('[UploadController] Profiling error:', err.message);
-      const isClientError = /password-protected|encrypted|unsupported file format|empty dataset/i.test(err.message);
+      const isClientError = /password-protected|encrypted|unsupported file format|empty dataset|failed to read|invalid|corrupt|sheet|could not parse/i.test(err.message);
       return res.status(isClientError ? 400 : 500).json({
         success: false,
         error: isClientError ? err.message : `Profiling failed: ${err.message}`
@@ -64,7 +65,7 @@ export const uploadController = {
       return res.status(400).json({ success: false, error: 'No dataset file provided.' });
     }
 
-    const tempFilePath = req.file ? req.file.path : null;
+    const tempFilePath = req.file ? path.resolve(req.file.path) : null;
     const jobId = req.body.jobId || `job_${Date.now()}`;
 
     // Parse dynamic config if provided in form data

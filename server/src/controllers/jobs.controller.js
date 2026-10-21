@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import ExcelJS from 'exceljs';
 import { db } from '../config/db.js';
 import { jobStreamService } from '../services/jobStreamService.js';
 
@@ -14,13 +17,60 @@ function sanitizeCsvValue(val) {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-function jsonToCsv(items) {
+function jsonToCsv(items, { formatCoordinates = false } = {}) {
   if (!items || items.length === 0) return '';
   const headers = Object.keys(items[0]);
   const rows = items.map(item =>
-    headers.map(h => sanitizeCsvValue(item[h])).join(',')
+    headers.map(h => {
+      const name = h.toLowerCase();
+      const isCoordinate = name === 'lat' || name === 'latitude' ||
+        name === 'lon' || name === 'lng' || name === 'long' || name === 'longitude' ||
+        name.endsWith('_lat') || name.endsWith('_lon') || name.endsWith('_lng');
+      const value = formatCoordinates && isCoordinate &&
+        item[h] !== null && item[h] !== undefined && item[h] !== '' &&
+        Number.isFinite(Number(item[h]))
+        ? Number(item[h]).toFixed(2)
+        : item[h];
+      return sanitizeCsvValue(value);
+    }).join(',')
   );
   return [headers.join(','), ...rows].join('\r\n');
+}
+
+function isRawPreset(config = {}) {
+  const rawPresets = new Set(['raw_passthrough', 'data_only', 'no_privacy']);
+  return Boolean(config.skipPrivacy || config.skip_privacy) ||
+    rawPresets.has(config.activePreset) || rawPresets.has(config.preset);
+}
+
+async function sendXlsx(res, records, filename) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Processed Data');
+  const headers = records.length > 0 ? Object.keys(records[0]) : [];
+  if (headers.length > 0) {
+    worksheet.columns = headers.map(header => ({
+      header,
+      key: header,
+      width: Math.min(Math.max(header.length + 2, 12), 32)
+    }));
+    worksheet.addRows(records);
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(Buffer.from(buffer));
+}
+
+function getCleanedFilename(originalFilename, format = 'csv', isAggregate = false) {
+  const raw = String(originalFilename || 'traffic_data')
+    .replace(/^.*[\\/]/, '')
+    .replace(/\.[^/.]+$/, '');
+  const safeBase = raw.replace(/["'\r\n]/g, '').trim() || 'traffic_data';
+  const cleanedBase = safeBase.endsWith('_cleaned') ? safeBase : `${safeBase}_cleaned`;
+  const suffix = isAggregate ? '_aggregated' : '';
+  const cleanExt = String(format || 'csv').replace(/^\./, '').toLowerCase();
+  return `${cleanedBase}${suffix}.${cleanExt}`;
 }
 
 export const jobsController = {
@@ -263,31 +313,39 @@ export const jobsController = {
         return res.status(404).json({ success: false, error: 'Job not found' });
       }
 
-      if (type === 'aggregate') {
+      const aggregateMode = String(
+        job.config?.riskReductionMode || job.config?.risk_reduction_mode || ''
+      ).toLowerCase() === 'aggregate';
+      const isAggregateMode = type === 'aggregate' || aggregateMode;
+      const downloadFilename = getCleanedFilename(job.originalFilename, format, isAggregateMode);
+
+      if (type === 'aggregate' || aggregateMode) {
         const rawAgg = job.aggregatedRecords || [];
-        const aggRecords = rawAgg.map(r => ({
-          road_segment: r.road_segment,
-          hour: r.hour || r.hour_bucket,
-          record_count: r.record_count,
-          avg_speed: r.avg_speed,
-          max_speed: r.max_speed,
-          outlier_count: r.outlier_count,
-          congestion_low_count: r.congestion_low_count ?? 0,
-          congestion_moderate_count: r.congestion_moderate_count ?? 0,
-          congestion_high_count: r.congestion_high_count ?? 0,
-          congestion_counts: typeof r.congestion_counts === 'object' ? JSON.stringify(r.congestion_counts) : (r.congestion_counts || '')
-        }));
+        const aggRecords = rawAgg.map(record => Object.fromEntries(
+          Object.entries(record).map(([key, value]) => [
+            key,
+            value !== null && typeof value === 'object' ? JSON.stringify(value) : value
+          ])
+        ));
+        const expectedRows = Number(job.summary?.processed_rows);
+        if (aggregateMode && Number.isFinite(expectedRows) && rawAgg.length !== expectedRows) {
+          throw new Error(
+            `Aggregate download row count mismatch: ${rawAgg.length} records, summary reports ${expectedRows}.`
+          );
+        }
 
         if (format === 'json') {
           res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Content-Disposition', 'attachment; filename="aggregated.json"');
+          res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
           return res.send(JSON.stringify(rawAgg, null, 2));
+        } else if (format === 'xlsx') {
+          return sendXlsx(res, aggRecords, downloadFilename);
         } else {
           const csvData = aggRecords.length > 0
             ? jsonToCsv(aggRecords)
-            : 'road_segment,hour,record_count,avg_speed,max_speed,outlier_count,congestion_low_count,congestion_moderate_count,congestion_high_count,congestion_counts\r\n';
+            : '';
           res.setHeader('Content-Type', 'text/csv');
-          res.setHeader('Content-Disposition', 'attachment; filename="aggregated.csv"');
+          res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
           return res.send(csvData);
         }
       }
@@ -299,16 +357,25 @@ export const jobsController = {
       if ((!records || records.length === 0) && Array.isArray(job.records) && job.records.length > 0) {
         records = job.records;
       }
-      const safeFilename = `anonymized-traffic-${id}`;
+      const expectedRows = Number(job.summary?.processed_rows);
+      if (Number.isFinite(expectedRows) && records.length !== expectedRows) {
+        throw new Error(
+          `Download row count mismatch: ${records.length} records, summary reports ${expectedRows}.`
+        );
+      }
 
       if (format === 'json') {
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.json"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
         return res.send(JSON.stringify(records, null, 2));
+      } else if (format === 'xlsx') {
+        return sendXlsx(res, records, downloadFilename);
       } else {
-        const csvData = jsonToCsv(records);
+        const csvData = jsonToCsv(records, {
+          formatCoordinates: !isRawPreset(job.config)
+        });
         res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.csv"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
         return res.send(csvData);
       }
     } catch (err) {
@@ -353,10 +420,11 @@ export const jobsController = {
       const piiReport = job.piiReport || [];
       const rejectedRows = job.rejectedRows || [];
       const kAnon = job.kAnonymity || summary.k_anonymity || {};
-      const riskLvl = summary.re_identification_risk || kAnon.risk_badge || 'LOW';
-      const complianceCert = riskLvl === 'HIGH'
-        ? 'PASSED_WITH_WARNINGS (High re-identification risk: >20% rows in groups with k<3)'
-        : (summary.overall_status === 'PASSED' ? 'PASSED (Compliance Verified)' : summary.overall_status || 'PASSED_WITH_WARNINGS');
+      const riskLvl = summary.re_identification_risk || kAnon.risk_badge || 'UNKNOWN';
+      const complianceCert = summary.compliance_status || job.complianceStatus
+        || (riskLvl !== 'LOW'
+          ? 'PASSED_WITH_WARNINGS (Risk is not certified as LOW)'
+          : (summary.overall_status === 'PASSED' ? 'PASSED (Compliance Verified)' : summary.overall_status || 'PASSED_WITH_WARNINGS'));
 
       const distribution = kAnon.group_size_distribution || [];
       const distLines = distribution.length > 0

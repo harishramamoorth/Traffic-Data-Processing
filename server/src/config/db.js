@@ -132,20 +132,34 @@ class Database {
   // Record Operations (Anonymized Data Only)
   // ---------------------------------------------------------------------------
   async saveRecords(jobId, recordsArray) {
-    if (!recordsArray || recordsArray.length === 0) return;
+    const records = recordsArray || [];
 
     // Cache in memory
-    this.inMemoryRecords.set(jobId, recordsArray);
+    this.inMemoryRecords.set(jobId, records);
 
     if (this.isConnected) {
       try {
-        const docs = recordsArray.map((r, i) => ({
+        const docs = records.map((r, i) => ({
           id: `${jobId}_rec_${i}`,
           jobId,
           data: r,
           createdAt: new Date()
         }));
-        await RecordModel.insertMany(docs, { ordered: false });
+        if (docs.length === 0) {
+          await RecordModel.deleteMany({ jobId });
+          return;
+        }
+        await RecordModel.bulkWrite(docs.map(doc => ({
+          replaceOne: {
+            filter: { id: doc.id },
+            replacement: doc,
+            upsert: true
+          }
+        })));
+        await RecordModel.deleteMany({
+          jobId,
+          id: { $nin: docs.map(doc => doc.id) }
+        });
       } catch (err) {
         console.error('Error batch inserting records into MongoDB:', err.message);
       }
@@ -219,6 +233,9 @@ class Database {
   }
 
   async getAllRecordsForJob(jobId) {
+    const cachedRecords = this.inMemoryRecords.get(jobId);
+    if (cachedRecords) return cachedRecords;
+
     if (this.isConnected) {
       try {
         const docs = await RecordModel.find({ jobId }).sort({ createdAt: 1 }).lean();

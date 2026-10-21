@@ -16,7 +16,7 @@ export const jobConfigSchema = z.object({
   removeDuplicates: z.boolean().optional().default(true),
   outlierStrategy: z.enum(['flag_only', 'set_null', 'cap']).optional().default('flag_only'),
   gpsPrecision: z.number().int().min(0).max(4).optional().default(2),
-  timeBucketMinutes: z.union([z.literal(5), z.literal(15), z.literal(30), z.literal(60)]).optional().default(15),
+  timeBucketMinutes: z.union([z.literal(0), z.literal(5), z.literal(15), z.literal(30), z.literal(60)]).optional().default(15),
   suppressLowK: z.boolean().optional().default(false),
   riskReductionMode: z.enum(['none', 'suppress', 'aggregate']).optional().default('none'),
   kThreshold: z.number().int().min(2).max(10).optional().default(3),
@@ -43,6 +43,9 @@ export function validateJobConfig(config) {
   }
   if (normalized.kThreshold !== undefined && normalized.kThreshold !== null) {
     normalized.kThreshold = Number(normalized.kThreshold);
+    if (normalized.kThreshold < 2 && normalized.riskReductionMode === 'none') {
+      normalized.kThreshold = 3;
+    }
   }
   return jobConfigSchema.safeParse(normalized);
 }

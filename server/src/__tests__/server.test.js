@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
+import ExcelJS from 'exceljs';
 import app from '../app.js';
 import { db } from '../config/db.js';
 import { upload } from '../middleware/upload.js';
@@ -14,12 +15,19 @@ const __dirname = path.dirname(__filename);
 
 describe('Server Integration Test Suite with Supertest (Path 4)', () => {
   let createdJobId = null;
+  let aggregateJobId = null;
+
+  const parseXlsx = (res, callback) => {
+    const chunks = [];
+    res.on('data', chunk => chunks.push(chunk));
+    res.on('end', () => callback(null, Buffer.concat(chunks)));
+  };
 
   const sampleCsvContent = `record_id,timestamp,vehicle_plate,driver_name,driver_ssn,vehicle_type,speed_mph,latitude,longitude,road_segment,congestion_level,notes
 TRF-9468,2026-10-17T15:33:52Z,DCN-2584,Fatima Nguyen,954-87-5333,Commercial Van,23.8,40.730165,-73.98771,Houston Street,High,Driver phone 555-0101
-TRF-9249,2026-10-17T18:41:34Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,35.2,40.776748,-73.970966,Central Park West,Moderate,Clear
-TRF-8102,2026-10-17T18:45:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,36.0,40.776700,-73.971000,Central Park West,Moderate,Clear
-TRF-8103,2026-10-17T18:50:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,34.5,40.776800,-73.971100,Central Park West,Moderate,Clear
+TRF-9249,2026-10-17T18:45:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,35.2,40.776748,-73.970966,Central Park West,Moderate,Clear
+TRF-8102,2026-10-17T18:46:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,36.0,40.776700,-73.971000,Central Park West,Moderate,Clear
+TRF-8103,2026-10-17T18:47:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,34.5,40.776800,-73.971100,Central Park West,Moderate,Clear
 `;
 
   const tempCsvPath = path.join(__dirname, 'temp_test_traffic.csv');
@@ -156,6 +164,18 @@ TRF-8103,2026-10-17T18:50:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,34.5,40.77
     }
   });
 
+  it('exports exactly the processed row count and writes coordinates with two decimal places', async () => {
+    const job = await db.getJob(createdJobId);
+    const res = await request(app)
+      .get(`/api/jobs/${createdJobId}/download?format=csv&type=row`);
+
+    assert.equal(res.status, 200);
+    const lines = res.text.trim().split(/\r?\n/);
+    assert.equal(lines.length - 1, job.summary.processed_rows);
+    assert.match(res.text, /"40\.\d{2}"/);
+    assert.match(res.text, /"-73\.\d{2}"/);
+  });
+
   // 7. Downloads & Audit Report Endpoints
   it('GET /api/jobs/:id/download?format=csv downloads cleaned CSV with no raw PII', async () => {
     assert.ok(createdJobId);
@@ -182,6 +202,89 @@ TRF-8103,2026-10-17T18:50:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,34.5,40.77
     assert.ok(parsed.length > 0);
   });
 
+  it('aggregate-mode row downloads return only aggregated records', async () => {
+    const uploadRes = await request(app)
+      .post('/api/jobs/upload')
+      .field('config', JSON.stringify({ riskReductionMode: 'aggregate', kThreshold: 2 }))
+      .attach('file', tempCsvPath);
+
+    assert.equal(uploadRes.status, 200);
+    aggregateJobId = uploadRes.body.job.id;
+    const job = await db.getJob(aggregateJobId);
+    assert.ok(job.aggregatedRecords.length > 0);
+    assert.deepEqual(
+      uploadRes.body.before_after_sample.after,
+      job.aggregatedRecords.slice(0, 20)
+    );
+
+    const res = await request(app)
+      .get(`/api/jobs/${aggregateJobId}/download?format=json&type=row`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.text), job.aggregatedRecords);
+    assert.equal(JSON.parse(res.text).length, job.summary.processed_rows);
+
+    const csvRes = await request(app)
+      .get(`/api/jobs/${aggregateJobId}/download?format=csv&type=row`);
+    assert.equal(csvRes.status, 200);
+    const csvLines = csvRes.text.trim().split(/\r?\n/);
+    assert.equal(csvLines.length - 1, job.summary.processed_rows);
+    assert.match(csvLines[0], /record_count/);
+    const headers = Object.keys(job.aggregatedRecords[0]);
+    const csvCell = value => {
+      let text = value === null || value === undefined ? '' : String(value);
+      if (/^[=+\-@\t\r]/.test(text) && !/^[+\-]?\d+(\.\d+)?$/.test(text.trim())) {
+        text = `'${text}`;
+      }
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const expectedCsv = [
+      headers.join(','),
+      ...job.aggregatedRecords.map(record =>
+        headers.map(header => csvCell(record[header])).join(',')
+      )
+    ].join('\r\n');
+    assert.equal(csvRes.text, expectedCsv);
+  });
+
+  it('GET /api/jobs/:id/download?format=xlsx downloads a workbook for this job', async () => {
+    assert.ok(createdJobId);
+    const res = await request(app)
+      .get(`/api/jobs/${createdJobId}/download?format=xlsx`)
+      .buffer(true)
+      .parse(parseXlsx);
+
+    assert.equal(res.status, 200);
+    assert.match(res.headers['content-type'], /spreadsheetml\.sheet/);
+    assert.ok(Buffer.isBuffer(res.body));
+    assert.equal(res.body.subarray(0, 2).toString(), 'PK');
+  });
+
+  it('aggregate-mode Excel export matches the stored aggregate records', async () => {
+    assert.ok(aggregateJobId);
+    const job = await db.getJob(aggregateJobId);
+    const res = await request(app)
+      .get(`/api/jobs/${aggregateJobId}/download?format=xlsx&type=row`)
+      .buffer(true)
+      .parse(parseXlsx);
+
+    assert.equal(res.status, 200);
+    assert.match(res.headers['content-type'], /spreadsheetml\.sheet/);
+    assert.ok(Buffer.isBuffer(res.body));
+    assert.equal(res.body.subarray(0, 2).toString(), 'PK');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(res.body);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.rowCount - 1, job.summary.processed_rows);
+    const headers = sheet.getRow(1).values.slice(1);
+    assert.deepEqual(headers, Object.keys(job.aggregatedRecords[0]));
+    job.aggregatedRecords.forEach((record, index) => {
+      assert.deepEqual(
+        sheet.getRow(index + 2).values.slice(1),
+        Object.values(record)
+      );
+    });
+  });
+
   it('GET /api/jobs/:id/download?format=csv&type=aggregate downloads aggregated dataset', async () => {
     assert.ok(createdJobId);
     const res = await request(app)
@@ -189,7 +292,7 @@ TRF-8103,2026-10-17T18:50:00Z,DVH-1651,Anna Johnson,963-94-9565,Sedan,34.5,40.77
 
     assert.equal(res.status, 200);
     assert.match(res.headers['content-type'], /text\/csv/);
-    assert.ok(res.text.includes('road_segment'));
+    assert.equal(res.text, '');
   });
 
   it('GET /api/jobs/:id/report returns markdown audit report with zero-retention attestation', async () => {

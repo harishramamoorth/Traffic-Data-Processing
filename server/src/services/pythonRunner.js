@@ -24,10 +24,11 @@ export function runPythonProfiler(filePath, sample = false, sheet = null) {
       '--profile'
     ];
 
-    if (sample || !filePath) {
+    const absoluteFilePath = filePath ? path.resolve(filePath) : null;
+    if (sample || !absoluteFilePath) {
       args.push('--sample');
     } else {
-      args.push('--input', filePath);
+      args.push('--input', absoluteFilePath);
     }
 
     if (sheet) {
@@ -42,7 +43,8 @@ export function runPythonProfiler(filePath, sample = false, sheet = null) {
       env: {
         ...process.env,
         HASH_SECRET: env.HASH_SECRET,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        PYTHONIOENCODING: 'utf-8'
       }
     });
 
@@ -99,15 +101,14 @@ export function runPythonProcessor(filePath, configOverride = null, onProgress =
   return new Promise((resolve, reject) => {
     const pythonExecutable = env.PYTHON_PATH;
     const args = [
-      PROCESSOR_SCRIPT,
-      '--hash-secret',
-      env.HASH_SECRET
+      PROCESSOR_SCRIPT
     ];
 
-    if (sample || !filePath) {
+    const absoluteFilePath = filePath ? path.resolve(filePath) : null;
+    if (sample || !absoluteFilePath) {
       args.push('--sample');
     } else {
-      args.push('--input', filePath);
+      args.push('--input', absoluteFilePath);
     }
 
     const effectiveSheet = sheet || (configOverride && configOverride.sheet ? configOverride.sheet : null);
@@ -128,7 +129,8 @@ export function runPythonProcessor(filePath, configOverride = null, onProgress =
       env: {
         ...process.env,
         HASH_SECRET: env.HASH_SECRET,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        PYTHONIOENCODING: 'utf-8'
       }
     });
 
