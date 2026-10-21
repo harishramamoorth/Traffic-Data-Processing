@@ -36,15 +36,15 @@ const PROFILING_STEPS = [
 const TOUR_STEPS = [
   {
     title: '1. Zero-Storage Ingestion',
-    desc: 'Upload or load road traffic telemetry (.csv or .json). Staging files reside strictly in temporary RAM and are scrubbed immediately after processing.'
+    desc: 'Upload a tabular dataset (.csv, .tsv, .txt, .json, .xlsx, or .xls). Staging files are scrubbed after processing.'
   },
   {
     title: '2. Deep Schema & PII Profiling',
-    desc: 'The engine scans column headers and values to identify direct identifiers (plates, names, emails, phones) and quasi-identifiers (GPS, timestamps).'
+    desc: 'The engine profiles every column by its name, values, type, and cardinality, then lets you review detected roles.'
   },
   {
     title: '3. Privacy vs. Utility Tuning',
-    desc: 'Fine-tune HMAC pseudonymization, spatial truncation (GPS decimal rounding), time-bucketing, and k-anonymity suppression with live score calculations.'
+    desc: 'Choose privacy actions, required fields, group thresholds, and any configured value constraints before processing.'
   },
   {
     title: '4. Reconciled Audit & Results',
@@ -191,7 +191,7 @@ export default function Step1Upload() {
       if (acceptedFiles && acceptedFiles.length > 0) {
         const f = acceptedFiles[0];
         if (f.size === 0) {
-          const errMsg = 'The uploaded file is empty (0 bytes). Please upload a dataset with traffic telemetry records.';
+          const errMsg = 'The uploaded file is empty (0 bytes). Please upload a dataset containing tabular data.';
           setUploadError({ message: errMsg, file: f, isSample: false });
           addToast({ type: 'error', title: 'Empty File', message: errMsg });
           return;
@@ -256,7 +256,7 @@ export default function Step1Upload() {
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-theme-text">
-          Upload Road Traffic Telemetry Dataset
+          Upload a dataset
         </h2>
         <p className="text-xs sm:text-sm text-theme-muted max-w-xl mx-auto">
           Files are profiled entirely in-memory to detect schema, PII, and anomalies. No raw records are stored to disk or MongoDB.
@@ -479,7 +479,7 @@ export default function Step1Upload() {
                 NYC Traffic Telemetry
               </h3>
               <p className="text-xs text-theme-muted mt-1 leading-relaxed">
-                Test the full pipeline instantly with 527 real vehicle records containing license plates, GPS coordinates, timestamps, and speeds.
+                Try the workflow with the optional bundled sample dataset.
               </p>
             </div>
 
@@ -523,7 +523,7 @@ export default function Step1Upload() {
           <CheckCircle2 className="w-4 h-4 text-theme-accent shrink-0" />
           <div>
             <span className="font-bold text-theme-text">Auto-Schema Profiling</span>
-            <p className="text-[10px] text-theme-dim">Detects plates, GPS coordinates, timestamps, and speeds</p>
+            <p className="text-[10px] text-theme-dim">Profiles detected data types, identifiers, text, and measurements</p>
           </div>
         </div>
         <div className="flex items-center gap-2.5">

@@ -8,16 +8,14 @@ import {
   PieChart as PieIcon,
   FileSpreadsheet,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  BarChart3,
+  Tags
 } from 'lucide-react';
 import GlassPieChart from '../3d/Glasspiechart';
 import {
   ChartCard,
   MissingDataCard,
-  SpeedDistributionCard,
-  HourlyVolumeCard,
-  GpsScatterCard,
-  DensityHeatmapCard,
 } from '../3d/GlassCharts';
 import AuraStatsPanel from '../3d/Aurastatcard';
 import axios from 'axios';
@@ -127,7 +125,7 @@ export default function Step2Analysis() {
           <p className="text-xs text-theme-muted mt-1.5 leading-relaxed">
             {file
               ? `Extracting telemetry schema and scanning PII columns for '${file.name || 'uploaded dataset'}'...`
-              : 'Profiling traffic telemetry records and computing data health metrics...'}
+              : 'Profiling the uploaded table and computing data health metrics...'}
           </p>
         </div>
         <div className="pt-2 flex items-center justify-center gap-3">
@@ -167,7 +165,7 @@ export default function Step2Analysis() {
     detected_pii = [],
     pii_columns_detected,
     outliers_count = 0,
-    health_score = 85,
+    health_score = 0,
     health_summary = '',
     columns = [],
     column_profiles = {},
@@ -176,7 +174,7 @@ export default function Step2Analysis() {
 
   // Single Source of Truth for PII Columns
   const piiColumnsList = pii_columns.length > 0 ? pii_columns : (detected_pii.length > 0 ? detected_pii : []);
-  const piiCount = piiColumnsList.length;
+  const piiCount = pii_columns_detected ?? piiColumnsList.filter((p) => p.category !== 'data_attribute').length;
 
   // Format file size safely
   const formatFileSize = (bytes) => {
@@ -188,8 +186,7 @@ export default function Step2Analysis() {
   const displayFileSize = file_size_formatted ||
     formatFileSize(file_size) ||
     formatFileSize(file_size_bytes) ||
-    formatFileSize(profile.file_size) ||
-    '65.6 KB';
+    formatFileSize(profile.file_size);
 
   // Extract all columns
   const columnList = Array.isArray(columns) && columns.length > 0
@@ -224,7 +221,7 @@ export default function Step2Analysis() {
               Pre-Flight Analysis
             </span>
             <span className="text-xs text-theme-dim">•</span>
-            <span className="text-xs font-mono text-theme-muted truncate max-w-xs">{filename || file_name || 'sample_traffic_data.csv'}</span>
+            <span className="text-xs font-mono text-theme-muted truncate max-w-xs">{filename || file_name || 'Uploaded dataset'}</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-bold text-theme-text mt-1">
             Dataset Inspection & Privacy Audit
@@ -278,11 +275,11 @@ export default function Step2Analysis() {
         score={health_score}
         stats={[
           { title: 'File size / type', value: displayFileSize, subtitle: file_type || 'CSV', level: health_score, levelLabel: 'file health' },
-          { title: 'Total rows', value: row_count, subtitle: '100% reconciled', level: 100, levelLabel: 'reconciled' },
+          { title: 'Input rows', value: row_count, subtitle: 'Source row count', level: 100, levelLabel: 'counted' },
           { title: 'Total columns', value: column_count || columnList.length, subtitle: 'Schema extracted', level: 100, levelLabel: 'extracted' },
           { title: 'Duplicate rows', value: duplicate_count, subtitle: duplicate_count > 0 ? 'Marked for rejection' : 'Clean', level: pct(row_count - duplicate_count, row_count), levelLabel: 'unique', tone: duplicate_count > 0 ? 'warn' : 'ok' },
           { title: 'PII detected', value: piiCount, subtitle: piiCount > 0 ? `${piiCount} sensitive attributes` : 'None detected', level: pct(totalCols - piiCount, totalCols), levelLabel: 'PII-free', tone: piiCount > 0 ? 'alert' : 'ok' },
-          { title: 'Speed outliers', value: outliers_count, subtitle: 'Flagged in output', level: pct(row_count - outliers_count, row_count), levelLabel: 'in range', tone: outliers_count > 0 ? 'warn' : 'ok' },
+          { title: 'Configured rule issues', value: outliers_count, subtitle: 'User-selected checks', level: pct(row_count - outliers_count, row_count), levelLabel: 'within rules', tone: outliers_count > 0 ? 'warn' : 'ok' },
         ]}
       />
 
@@ -456,59 +453,41 @@ export default function Step2Analysis() {
           <MissingDataCard data={charts.null_percentages || []} />
         </motion.div>
 
-        {/* 4. Speed Distribution */}
-        <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16, scale: 0.98 },
-            show: {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              transition: { type: 'spring', stiffness: 280, damping: 24 },
-            },
-          }}
-        >
-          <SpeedDistributionCard data={charts.speed_distribution || []} />
+        <motion.div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <ChartCard icon={BarChart3} title="Numeric distributions" badge={`${Object.keys(charts.numeric_distributions || {}).length} columns`} accent="#06b6d4">
+            <div className="max-h-64 space-y-4 overflow-y-auto">
+              {Object.entries(charts.numeric_distributions || {}).map(([column, bins]) => {
+                const max = Math.max(1, ...bins.map((bin) => bin.count));
+                return (
+                  <div key={column}>
+                    <p className="mb-2 truncate text-[11px] font-semibold text-theme-text">{column}</p>
+                    <div className="flex h-12 items-end gap-1">
+                      {bins.map((bin, index) => (
+                        <span key={`${column}-${index}`} title={`${bin.range}: ${bin.count}`} className="flex-1 rounded-t bg-cyan-500/70" style={{ height: `${Math.max(4, (bin.count / max) * 100)}%` }} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {Object.keys(charts.numeric_distributions || {}).length === 0 && <p className="py-8 text-center text-xs text-theme-dim">No numeric columns detected.</p>}
+            </div>
+          </ChartCard>
+          <ChartCard icon={Tags} title="Common categorical values" badge="Top values" accent="#10b981">
+            <div className="max-h-64 space-y-3 overflow-y-auto">
+              {Object.entries(charts.categorical_distributions || {}).map(([column, values]) => (
+                <div key={column}>
+                  <p className="mb-1 truncate text-[11px] font-semibold text-theme-text">{column}</p>
+                  {values.slice(0, 5).map((entry) => (
+                    <div key={`${column}-${entry.value}`} className="flex justify-between gap-2 text-[10px] text-theme-dim">
+                      <span className="truncate">{entry.value}</span><span>{entry.count}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {Object.keys(charts.categorical_distributions || {}).length === 0 && <p className="py-8 text-center text-xs text-theme-dim">No low-cardinality columns detected.</p>}
+            </div>
+          </ChartCard>
         </motion.div>
-
-        {/* 5. Volume by Hour */}
-        <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16, scale: 0.98 },
-            show: {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              transition: { type: 'spring', stiffness: 280, damping: 24 },
-            },
-          }}
-        >
-          <HourlyVolumeCard data={charts.records_by_hour || []} />
-        </motion.div>
-
-        {/* 6. GPS Coordinate Points */}
-        <motion.div
-          variants={{
-            hidden: { opacity: 0, y: 16, scale: 0.98 },
-            show: {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              transition: { type: 'spring', stiffness: 280, damping: 24 },
-            },
-          }}
-        >
-          <GpsScatterCard data={charts.coordinate_scatter || []} />
-        </motion.div>
-      </motion.div>
-
-      {/* 7. Traffic Density Matrix */}
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <DensityHeatmapCard data={charts.day_hour_heatmap || []} />
       </motion.div>
 
       {/* Column Schema & Sparkline Table (Item 10: All columns) */}
@@ -521,7 +500,7 @@ export default function Step2Analysis() {
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-theme-text uppercase tracking-wider flex items-center gap-1.5">
             <Columns className="w-4 h-4 text-cyan-400" />
-            Column Inspection & Sparkline Telemetry
+            Column profile and summary statistics
           </span>
           <span className="text-xs text-theme-muted font-mono">{columnList.length} Columns Extracted</span>
         </div>
@@ -541,7 +520,7 @@ export default function Step2Analysis() {
             <tbody className="divide-y divide-theme-border/50">
               {columnList.map((col) => {
                 const colName = col.name;
-                const isPii = piiColumnsList.some((p) => (p.name || p.column) === colName);
+                const isPii = piiColumnsList.some((p) => (p.name || p.column) === colName && p.category !== 'data_attribute');
                 const nullRate = col.null_pct ?? col.null_percentage ?? 0;
                 return (
                   <tr key={colName} className="hover:bg-theme-secondary/40 transition-colors">

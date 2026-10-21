@@ -12,25 +12,23 @@ export const DEFAULT_CONFIG = {
   riskReductionMode: 'none', // 'none' | 'suppress' | 'aggregate'
   kThreshold: 3, // 2 to 10
   piiActions: {}, // { column: action }
+  columnTypes: {},
   missingValueStrategy: {} // { column: 'drop' | 'median' | 'mode' | 'leave_null' }
 };
 
 export const PRESET_DEFINITIONS = {
-  max_privacy: {
-    id: 'max_privacy',
-    name: 'Public Statistics (Max Privacy)',
-    badge: 'Public Portal / Strict',
-    desc: 'Aggressive data minimization, 1-decimal GPS (~11 km), 60-min time bucketing, Suppress (K=3) or Aggregate macro table.',
-    gpsPrecision: 1,
-    timeBucketMinutes: 60,
-    outlierStrategy: 'set_null',
-    suppressLowK: true,
-    riskReductionMode: 'suppress',
+  raw_passthrough: {
+    id: 'raw_passthrough',
+    name: 'Data Processing Only (No Privacy)',
+    badge: 'No Privacy Applied',
+    desc: 'Retains source values and clearly labels outputs as having no privacy applied. Use only where retention is explicitly authorized.',
+    gpsPrecision: 4,
+    timeBucketMinutes: 0,
+    outlierStrategy: 'flag_only',
+    suppressLowK: false,
+    riskReductionMode: 'none',
     kThreshold: 3,
-    getAction: (col, category) => {
-      if (category === 'coordinates') return 'GENERALIZE_SPATIAL';
-      return 'DROP_COLUMN';
-    }
+    getAction: () => 'KEEP'
   },
   balanced: {
     id: 'balanced',
@@ -44,10 +42,12 @@ export const PRESET_DEFINITIONS = {
     riskReductionMode: 'none',
     kThreshold: 3,
     getAction: (col, category) => {
-      if (category === 'plate_number' || category === 'identifier') return 'PSEUDONYMIZE_HMAC';
+      if (category === 'plate_number' || category === 'identifier' || category === 'organization_name') return 'PSEUDONYMIZE_HMAC';
+      if (category === 'location_identifier') return 'REDACT';
       if (category === 'coordinates') return 'GENERALIZE_SPATIAL';
+      if (category === 'datetime' || category === 'timestamp') return 'TIME_BUCKET';
       if (category === 'free_text_pii') return 'REDACT';
-      return 'DROP_COLUMN';
+      return category === 'data_attribute' ? 'KEEP' : 'DROP_COLUMN';
     }
   },
   max_utility: {
@@ -62,10 +62,48 @@ export const PRESET_DEFINITIONS = {
     riskReductionMode: 'none',
     kThreshold: 3,
     getAction: (col, category) => {
-      if (category === 'plate_number' || category === 'identifier') return 'PSEUDONYMIZE_HMAC';
+      if (category === 'plate_number' || category === 'identifier' || category === 'organization_name') return 'PSEUDONYMIZE_HMAC';
+      if (category === 'location_identifier') return 'REDACT';
       if (category === 'coordinates') return 'GENERALIZE_SPATIAL';
+      if (category === 'datetime' || category === 'timestamp') return 'TIME_BUCKET';
       if (category === 'free_text_pii') return 'REDACT';
-      return 'PSEUDONYMIZE_HMAC';
+      return category === 'data_attribute' ? 'KEEP' : 'PSEUDONYMIZE_HMAC';
+    }
+  },
+  max_privacy: {
+    id: 'max_privacy',
+    name: 'Public Statistics (K=3)',
+    badge: 'K-safe rows',
+    desc: 'Suppresses groups below K=3, with 1-decimal GPS generalization and 60-minute time buckets.',
+    gpsPrecision: 1,
+    timeBucketMinutes: 60,
+    outlierStrategy: 'set_null',
+    suppressLowK: true,
+    riskReductionMode: 'suppress',
+    kThreshold: 3,
+    getAction: (col, category) => {
+      if (category === 'coordinates') return 'GENERALIZE_SPATIAL';
+      if (category === 'datetime' || category === 'timestamp') return 'TIME_BUCKET';
+      if (category === 'data_attribute') return 'KEEP';
+      return 'DROP_COLUMN';
+    }
+  },
+  maximum_privacy: {
+    id: 'maximum_privacy',
+    name: 'Maximum Privacy',
+    badge: 'Aggregate Only / K=5',
+    desc: 'Strongest privacy preset: aggregate-only output with minimum group size K=5, 1-decimal location generalization, and 60-minute time buckets. Risk is not zero.',
+    gpsPrecision: 1,
+    timeBucketMinutes: 60,
+    outlierStrategy: 'set_null',
+    suppressLowK: false,
+    riskReductionMode: 'aggregate',
+    kThreshold: 5,
+    getAction: (col, category) => {
+      if (category === 'coordinates') return 'GENERALIZE_SPATIAL';
+      if (category === 'datetime' || category === 'timestamp') return 'TIME_BUCKET';
+      if (category === 'data_attribute') return 'KEEP';
+      return 'DROP_COLUMN';
     }
   }
 };
@@ -78,12 +116,22 @@ export function getPresetConfig(presetKey, piiColumns = []) {
   if (presetKey === 'internal_analysis') effectiveKey = 'max_utility';
   if (presetKey === 'protected_sharing') effectiveKey = 'balanced';
   if (presetKey === 'public_statistics') effectiveKey = 'max_privacy';
+  if (presetKey === 'data_only' || presetKey === 'no_privacy' || presetKey === 'raw_passthrough') effectiveKey = 'raw_passthrough';
 
   const def = PRESET_DEFINITIONS[effectiveKey] || PRESET_DEFINITIONS.balanced;
   const piiActions = {};
   for (const p of piiColumns) {
     const colName = p.name || p.column;
-    piiActions[colName] = def.getAction(colName, p.category);
+    const semanticType = p.semantic_type;
+    piiActions[colName] = effectiveKey === 'raw_passthrough'
+      ? 'KEEP'
+      : semanticType === 'direct_identifier'
+      ? 'DROP_COLUMN'
+      : semanticType === 'free_text'
+        ? 'REDACT'
+        : semanticType === 'numeric_measure' || semanticType === 'other'
+          ? 'KEEP'
+          : def.getAction(colName, p.category);
   }
   return {
     gpsPrecision: def.gpsPrecision,
@@ -112,6 +160,7 @@ export function computeScores(config = {}, piiColumns = []) {
 
   for (const p of piiColumns) {
     const colName = p.name || p.column;
+    if (p.category === 'data_attribute') continue;
     const act = piiActions[colName] || p.default_action || p.recommended_action || 'DROP_COLUMN';
     if (act === 'DROP_COLUMN') dropCount++;
     else if (act === 'PSEUDONYMIZE_HMAC') hmacCount++;
@@ -126,7 +175,7 @@ export function computeScores(config = {}, piiColumns = []) {
 
   // Base Privacy Score (0-100)
   const gpsPrivacyDelta = (2 - gpsPrecision) * 6; // precision 0 (+12), 1 (+6), 2 (0), 3 (-6), 4 (-12)
-  const timePrivacyDelta = timeBucketMinutes >= 60 ? 10 : timeBucketMinutes >= 30 ? 6 : timeBucketMinutes >= 15 ? 0 : -6;
+  const timePrivacyDelta = timeBucketMinutes === 0 ? -10 : timeBucketMinutes >= 60 ? 10 : timeBucketMinutes >= 30 ? 6 : timeBucketMinutes >= 15 ? 0 : -6;
   const actionPrivacyDelta = (dropCount * 7) + (hmacCount * 5) + (redactCount * 5) + (generalizeCount * 4) + (timeBucketCount * 4) - (keepCount * 18);
 
   const rawBasePrivacy = 55 + actionPrivacyDelta + gpsPrivacyDelta + timePrivacyDelta;
@@ -134,7 +183,7 @@ export function computeScores(config = {}, piiColumns = []) {
 
   // Base Utility Score (0-100)
   const gpsUtilityDelta = (gpsPrecision - 2) * 8; // precision 0 (-16), 1 (-8), 2 (0), 3 (+8), 4 (+16)
-  const timeUtilityDelta = timeBucketMinutes <= 5 ? 10 : timeBucketMinutes <= 15 ? 0 : timeBucketMinutes <= 30 ? -8 : -16;
+  const timeUtilityDelta = timeBucketMinutes === 0 ? 12 : timeBucketMinutes <= 5 ? 10 : timeBucketMinutes <= 15 ? 0 : timeBucketMinutes <= 30 ? -8 : -16;
   const actionUtilityDelta = (keepCount * 8) + (hmacCount * 6) + (generalizeCount * 5) + (redactCount * 3) + (timeBucketCount * 4) - (dropCount * 8);
 
   const rawBaseUtility = 62 + actionUtilityDelta + gpsUtilityDelta + timeUtilityDelta;
@@ -157,7 +206,7 @@ export function computeScores(config = {}, piiColumns = []) {
   } else if (mode === 'aggregate') {
     afterPrivacy = 96;
     afterUtility = Math.max(30, Math.round(baseUtilityScore * 0.65));
-    afterRisk = 'Low (Zero microdata)';
+    afterRisk = 'Aggregate only';
   }
 
   return {
@@ -221,9 +270,20 @@ export const useWorkflowStore = create((set, get) => ({
     // Auto-populate default PII actions based on single source of truth pii_columns
     const piiCols = data?.pii_columns || data?.detected_pii || [];
     const initialPiiActions = {};
+    const initialColumnTypes = {};
     for (const p of piiCols) {
       const colName = p.name || p.column;
-      initialPiiActions[colName] = p.default_action || p.recommended_action || 'DROP_COLUMN';
+      const semanticType = p.semantic_type;
+      if (semanticType) initialColumnTypes[colName] = semanticType;
+      initialPiiActions[colName] = semanticType === 'direct_identifier'
+        ? 'DROP_COLUMN'
+        : semanticType === 'free_text'
+          ? 'REDACT'
+          : semanticType === 'numeric_measure' || semanticType === 'other'
+            ? 'KEEP'
+            : semanticType === 'quasi_identifier'
+              ? p.default_action || p.recommended_action || 'KEEP'
+              : p.default_action || p.recommended_action || 'DROP_COLUMN';
     }
     const sheetNames = data?.sheet_names || [];
     const selectedSheet = data?.selected_sheet || (sheetNames.length > 0 ? sheetNames[0] : null);
@@ -236,6 +296,7 @@ export const useWorkflowStore = create((set, get) => ({
       customConfig: {
         ...state.customConfig,
         sheet: selectedSheet,
+        columnTypes: { ...initialColumnTypes, ...state.customConfig.columnTypes },
         piiActions: { ...initialPiiActions, ...state.customConfig.piiActions }
       }
     }));
@@ -245,12 +306,16 @@ export const useWorkflowStore = create((set, get) => ({
 
   updateConfig: (updates) => {
     const nextUpdates = { ...updates };
+    const changesPrivacy = [
+      'riskReductionMode', 'gpsPrecision', 'timeBucketMinutes', 'piiActions',
+      'columnTypes', 'suppressLowK', 'kThreshold'
+    ].some((key) => key in nextUpdates);
     if ('riskReductionMode' in nextUpdates) {
       nextUpdates.suppressLowK = nextUpdates.riskReductionMode === 'suppress';
     }
     set((state) => ({
       customConfig: { ...state.customConfig, ...nextUpdates },
-      activePreset: 'custom'
+      activePreset: changesPrivacy ? 'custom' : state.activePreset
     }));
   },
 

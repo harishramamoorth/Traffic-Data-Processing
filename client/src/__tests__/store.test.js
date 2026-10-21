@@ -49,6 +49,44 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().customConfig.timeBucketMinutes).toBe(60);
   });
 
+  it('applies the aggregate-only Maximum Privacy preset and preserves exact raw preset time', () => {
+    useWorkflowStore.getState().setProfileData({
+      pii_columns: [
+        { name: 'entity', category: 'identifier', semantic_type: 'direct_identifier' },
+        { name: 'event_time', category: 'datetime', semantic_type: 'quasi_identifier' },
+        { name: 'value', category: 'data_attribute', semantic_type: 'numeric_measure' }
+      ]
+    });
+    useWorkflowStore.getState().applyPreset('maximum_privacy');
+    expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('aggregate');
+    expect(useWorkflowStore.getState().customConfig.kThreshold).toBe(5);
+    expect(useWorkflowStore.getState().customConfig.gpsPrecision).toBe(1);
+    expect(useWorkflowStore.getState().customConfig.timeBucketMinutes).toBe(60);
+    expect(useWorkflowStore.getState().customConfig.piiActions).toEqual({
+      entity: 'DROP_COLUMN',
+      event_time: 'TIME_BUCKET',
+      value: 'KEEP'
+    });
+
+    useWorkflowStore.getState().applyPreset('raw_passthrough');
+    expect(useWorkflowStore.getState().customConfig.timeBucketMinutes).toBe(0);
+  });
+
+  it('keeps detected identifiers and free text when Data Processing Only is selected', () => {
+    useWorkflowStore.getState().setProfileData({
+      pii_columns: [
+        { name: 'subject', semantic_type: 'direct_identifier' },
+        { name: 'narrative', semantic_type: 'free_text' }
+      ]
+    });
+    useWorkflowStore.getState().applyPreset('raw_passthrough');
+
+    expect(useWorkflowStore.getState().customConfig.piiActions).toEqual({
+      subject: 'KEEP',
+      narrative: 'KEEP'
+    });
+  });
+
   it('calculates dynamic privacy and utility trade-off scores', () => {
     useWorkflowStore.getState().setProfileData({
       pii_columns: [
@@ -78,7 +116,8 @@ describe('useWorkflowStore', () => {
     useWorkflowStore.getState().updateConfig({ riskReductionMode: 'aggregate', kThreshold: 5 });
     expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('aggregate');
     const aggScores = useWorkflowStore.getState().calculateScores();
-    expect(aggScores.afterRisk).toContain('Low');
+    expect(aggScores.afterRisk).toBe('Aggregate only');
+    expect(aggScores.privacyScore).toBeLessThan(100);
   });
 
   it('handles multi-sheet Excel profile data and sheet selection', () => {

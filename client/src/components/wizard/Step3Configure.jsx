@@ -18,10 +18,11 @@ import axios from 'axios';
  * ===================================================================== */
 
 /** Sanitized job config. K is sent ONLY for 'suppress' and 'aggregate'. */
-export function buildJobPayloadConfig(customConfig = {}, selectedSheet = null) {
+export function buildJobPayloadConfig(customConfig = {}, selectedSheet = null, activePreset = null) {
   const mode = customConfig.riskReductionMode || 'none';
   const isSuppressOrAggregate = mode === 'suppress' || mode === 'aggregate';
   const payload = { ...customConfig, riskReductionMode: mode, sheet: selectedSheet || customConfig.sheet };
+  if (activePreset) payload.activePreset = activePreset;
   if (isSuppressOrAggregate) payload.kThreshold = Number(customConfig.kThreshold ?? 3);
   else delete payload.kThreshold;
   return payload;
@@ -29,6 +30,27 @@ export function buildJobPayloadConfig(customConfig = {}, selectedSheet = null) {
 
 /** Permissible privacy actions, filtered strictly by column classification. */
 export function getAllowedActionsForColumn(pii) {
+  const semanticType = (pii?.semantic_type || '').toLowerCase();
+  if (semanticType === 'direct_identifier') {
+    return [
+      { value: 'PSEUDONYMIZE_HMAC', label: 'Pseudonymize (HMAC)' },
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+      { value: 'KEEP', label: 'Keep (Warning Required)' },
+    ];
+  }
+  if (semanticType === 'free_text') {
+    return [
+      { value: 'REDACT', label: 'Redact' },
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+      { value: 'KEEP', label: 'Keep (Warning Required)' },
+    ];
+  }
+  if (semanticType === 'numeric_measure' || semanticType === 'other') {
+    return [
+      { value: 'KEEP', label: 'Keep (Standard Attribute)' },
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+    ];
+  }
   const cat = (pii?.category || '').toLowerCase();
   const col = (pii?.name || pii?.column || '').toLowerCase();
   const classification = (pii?.classification || '').toLowerCase();
@@ -67,8 +89,23 @@ export function getAllowedActionsForColumn(pii) {
       { value: 'KEEP', label: 'Keep (Warning Required)' },
     ];
   }
+  if (cat === 'driver_name') {
+    return [
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+      { value: 'REDACT', label: 'Redact' },
+      { value: 'KEEP', label: 'Keep (Warning Required)' },
+    ];
+  }
+  if (cat === 'location_identifier') {
+    return [
+      { value: 'REDACT', label: 'Redact embedded PII' },
+      { value: 'PSEUDONYMIZE_HMAC', label: 'Pseudonymize (HMAC)' },
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+      { value: 'KEEP', label: 'Keep (Warning Required)' },
+    ];
+  }
   if (
-    ['identifier', 'plate_number', 'vin', 'device_id'].includes(cat) ||
+    ['identifier', 'organization_name', 'plate_number', 'vin', 'device_id'].includes(cat) ||
     col.endsWith('_id') || col.startsWith('id_') || col === 'plate' || col === 'vin' ||
     classification.includes('identifier') || classification.includes('plate') || classification.includes('vin')
   ) {
@@ -84,6 +121,13 @@ export function getAllowedActionsForColumn(pii) {
       { value: 'REDACT', label: 'Redact' },
       { value: 'PSEUDONYMIZE_HMAC', label: 'Pseudonymize (HMAC)' },
       { value: 'KEEP', label: 'Keep (Warning Required)' },
+    ];
+  }
+  if (cat === 'data_attribute') {
+    return [
+      { value: 'KEEP', label: 'Keep (Standard Attribute)' },
+      { value: 'DROP_COLUMN', label: 'Remove column' },
+      { value: 'PSEUDONYMIZE_HMAC', label: 'Pseudonymize (HMAC)' },
     ];
   }
   return [
@@ -108,7 +152,7 @@ export function getMaskedSampleDisplay(pii, action, customConfig = {}) {
     const min = customConfig?.timeBucketMinutes ?? 15;
     return `[${min}m UTC Floored]`;
   }
-  if (action === 'PSEUDONYMIZE_HMAC') return pii?.sample_masked || (raw ? `ANON_${raw.slice(0, 6)}` : 'ANON_7c9f8a12e4b0');
+  if (action === 'PSEUDONYMIZE_HMAC') return pii?.sample_masked || '[PSEUDONYMIZED]';
   if (action === 'REDACT') return pii?.sample_masked || '[REDACTED]';
   return pii?.sample_masked || '[REDACTED]';
 }
@@ -132,6 +176,7 @@ const RISK = {
   CRITICAL: { c: T.rose, order: 0 },
   HIGH: { c: T.orange, order: 1 },
   MEDIUM: { c: T.amber, order: 2 },
+  LOW: { c: T.sage, order: 3 },
 };
 const ACTION_META = {
   DROP_COLUMN: { icon: Trash2, c: T.rose, protect: 5, short: 'Removed' },
@@ -142,7 +187,7 @@ const ACTION_META = {
   KEEP: { icon: AlertTriangle, c: T.rose, protect: 0, short: 'Unprotected' },
 };
 const DIRECT_CATS = ['driver_name', 'ssn', 'national_id', 'phone', 'email', 'credit_card', 'dob', 'address', 'plate_number', 'vin', 'identifier'];
-const QUASI_CATS = ['coordinates', 'datetime', 'timestamp', 'device_id', 'ip_address'];
+const QUASI_CATS = ['coordinates', 'datetime', 'timestamp', 'device_id', 'ip_address', 'location_identifier'];
 const GPS_LABELS = ['City level (~111 km)', 'Town level (~11 km)', 'District level (~1.1 km)', 'Street level (~110 m)', 'Exact point (~11 m)'];
 const GPS_RADIUS = [25, 18, 12, 7, 3];
 
@@ -521,15 +566,9 @@ const rise = (i = 0) => ({
 });
 
 const SHARE = [
-  { mode: 'none', id: 'share-option-none', icon: Lock, title: 'Internal use only', desc: 'Keeps every row. You get a risk report only.' },
-  { mode: 'suppress', id: 'share-option-suppress', icon: Share2, title: 'Share with a partner', badge: 'Recommended', desc: 'Blurs time and location slightly and removes trips that would stand out. Recommended default.' },
-  { mode: 'aggregate', id: 'share-option-aggregate', icon: Globe, title: 'Publish publicly', desc: 'Produces summaries per road and hour. No individual trips.' },
-];
-
-const OUTLIERS = [
-  { v: 'flag_only', t: 'Flag only', badge: 'Recommended', d: 'Preserves original telemetry while adding `speed_outlier_flag = true` for QC audits.' },
-  { v: 'set_null', t: 'Set to null', d: 'Replaces physically impossible speeds (<0 or >250 mph) with null.' },
-  { v: 'cap', t: 'Cap at 120 mph', d: 'Truncates values above 120 mph (not recommended for strict audits).' },
+  { mode: 'none', id: 'share-option-none', icon: Lock, title: 'Internal use only', desc: 'Retains row-level output. Review the measured risk report before sharing.' },
+  { mode: 'suppress', id: 'share-option-suppress', icon: Share2, title: 'Share with a partner', badge: 'Recommended', desc: 'Generalizes configured quasi-identifiers and suppresses groups below the selected minimum size.' },
+  { mode: 'aggregate', id: 'share-option-aggregate', icon: Globe, title: 'Publish aggregates', desc: 'Releases only grouped numeric summaries whose group size meets the selected minimum.' },
 ];
 
 export default function Step3Configure() {
@@ -577,7 +616,7 @@ export default function Step3Configure() {
     const cols = profile?.columns || [];
     return cols
       .filter((c) => c.inferred_type === 'numeric' || c.dtype === 'numeric')
-      .map((c) => ({ column: c.name, min: c.stats?.min ?? 0, max: c.stats?.max ?? 100 }));
+      .map((c) => ({ column: c.name }));
   }, [profile?.columns]);
 
   const scores = useMemo(() => calculateScores(), [calculateScores, customConfig, piiColumns]);
@@ -586,10 +625,14 @@ export default function Step3Configure() {
   const allowedActionsMap = useMemo(() => {
     const map = {};
     for (const p of piiColumns) {
-      map[p.name || p.column] = getAllowedActionsForColumn(p);
+    const name = p.name || p.column;
+    map[name] = getAllowedActionsForColumn({
+      ...p,
+      semantic_type: customConfig.columnTypes?.[name] || p.semantic_type,
+    });
     }
     return map;
-  }, [piiColumns]);
+  }, [piiColumns, customConfig.columnTypes]);
 
   const presetScores = useMemo(() => {
     const scores = {};
@@ -620,7 +663,7 @@ export default function Step3Configure() {
       if (categoryFilter === 'direct') return DIRECT_CATS.includes(cat) || risk === 'critical' || risk === 'high';
       if (categoryFilter === 'quasi') return QUASI_CATS.includes(cat) || cls.includes('quasi') || cls.includes('gps');
       if (categoryFilter === 'high_risk') return risk === 'critical' || risk === 'high';
-      if (categoryFilter === 'unprotected') return (customConfig.piiActions?.[p.name || p.column] || p.default_action || p.recommended_action || 'DROP_COLUMN') === 'KEEP';
+      if (categoryFilter === 'unprotected') return cat !== 'data_attribute' && (customConfig.piiActions?.[p.name || p.column] || p.default_action || p.recommended_action || 'DROP_COLUMN') === 'KEEP';
       return true;
     });
     const sorted = [...list];
@@ -640,7 +683,7 @@ export default function Step3Configure() {
       if (DIRECT_CATS.includes(cat) || risk === 'critical' || risk === 'high') direct++;
       if (QUASI_CATS.includes(cat) || cls.includes('quasi') || cls.includes('gps')) quasi++;
       if (risk === 'critical' || risk === 'high') high++;
-      if ((customConfig.piiActions?.[p.name || p.column] || p.default_action || p.recommended_action || 'DROP_COLUMN') === 'KEEP') unprotected++;
+      if (cat !== 'data_attribute' && (customConfig.piiActions?.[p.name || p.column] || p.default_action || p.recommended_action || 'DROP_COLUMN') === 'KEEP') unprotected++;
     }
     return { total: piiColumns.length, direct, quasi, high, unprotected };
   }, [piiColumns, customConfig.piiActions]);
@@ -676,7 +719,7 @@ export default function Step3Configure() {
       for (const p of piiColumns) {
         const col = p.name || p.column;
         const cat = (p.category || '').toLowerCase();
-        if (['identifier', 'plate_number', 'vin', 'device_id'].includes(cat) || col.endsWith('_id') || col.startsWith('id_')) {
+        if (['identifier', 'organization_name', 'plate_number', 'vin', 'device_id'].includes(cat) || col.endsWith('_id') || col.startsWith('id_')) {
           updated[col] = 'PSEUDONYMIZE_HMAC'; count++;
         }
       }
@@ -690,6 +733,13 @@ export default function Step3Configure() {
         }
       }
       addToast(`Set ${count} direct personal identifiers to be dropped.`, 'success');
+    } else if (type === 'keep_all_raw') {
+      for (const p of piiColumns) {
+        const col = p.name || p.column;
+        updated[col] = 'KEEP';
+        count++;
+      }
+      addToast(`Set all ${count} fields to KEEP (100% Raw Data Preserved).`, 'info');
     } else if (type === 'reset_recommendations') {
       for (const p of piiColumns) {
         const col = p.name || p.column;
@@ -713,9 +763,35 @@ export default function Step3Configure() {
     }
   }, [updateConfig]);
 
+  const pickColumnType = useCallback((colName, semanticType) => {
+    const defaultAction = {
+      direct_identifier: 'DROP_COLUMN',
+      quasi_identifier: 'KEEP',
+      free_text: 'REDACT',
+      numeric_measure: 'KEEP',
+      other: 'KEEP',
+    }[semanticType];
+    updateConfig({
+      columnTypes: { ...(useWorkflowStore.getState().customConfig.columnTypes || {}), [colName]: semanticType },
+      piiActions: { ...(useWorkflowStore.getState().customConfig.piiActions || {}), [colName]: defaultAction },
+    });
+  }, [updateConfig]);
+
+  const updateNumericRule = (colName, bound, rawValue) => {
+    const requiredValueRules = { ...(customConfig.requiredValueRules || {}) };
+    const rule = { ...(requiredValueRules[colName] || {}) };
+    if (rawValue === '') delete rule[bound];
+    else rule[bound] = Number(rawValue);
+    requiredValueRules[colName] = rule;
+    const requiredColumns = new Set(customConfig.requiredColumns || []);
+    requiredColumns.add(colName);
+    updateConfig({ requiredValueRules, requiredColumns: [...requiredColumns] });
+  };
+
   /* ---- live preview: only compute when preview tab is active to preserve CPU and battery ---- */
   const previewPairs = useMemo(() => {
     if (activeTab !== 'preview') return [];
+    if (customConfig.riskReductionMode === 'aggregate') return [];
     const sourceRows = profile?.preview_rows?.length ? profile.preview_rows.slice(0, 5) : [];
     return sourceRows.map((row) => {
       const out = { ...row };
@@ -729,21 +805,6 @@ export default function Step3Configure() {
           const num = parseFloat(out[col]);
           if (!isNaN(num)) out[col] = Number(num.toFixed(customConfig?.gpsPrecision ?? 2));
         } else if (action === 'TIME_BUCKET') out[col] = `[${customConfig?.timeBucketMinutes ?? 15}m UTC Floored]`;
-      }
-      const timeMinutes = customConfig?.timeBucketMinutes ?? 15;
-      for (const k of Object.keys(out)) {
-        if ((k.toLowerCase().includes('time') || k.toLowerCase().includes('date')) && !String(out[k]).includes('Floored')) {
-          out[k] = `[${timeMinutes}m UTC Floored]`;
-        }
-      }
-      for (const k of Object.keys(out)) {
-        if (k.toLowerCase().includes('speed') || k.toLowerCase().includes('velocity')) {
-          const spd = parseFloat(out[k]);
-          if (!isNaN(spd)) {
-            if (customConfig?.outlierStrategy === 'set_null' && (spd > 120 || spd < 0 || spd > 250)) out[k] = null;
-            if (spd > 120 || spd < 0 || spd > 250) out.speed_outlier_flag = true;
-          }
-        }
       }
       return { src: row, out };
     });
@@ -782,7 +843,7 @@ export default function Step3Configure() {
     formData.append('jobId', jobId);
     formData.append('riskReductionMode', customConfig.riskReductionMode || 'none');
     if (isSuppressOrAggregate) formData.append('kThreshold', String(customConfig.kThreshold ?? 3));
-    formData.append('config', JSON.stringify(buildJobPayloadConfig(customConfig, selectedSheet)));
+    formData.append('config', JSON.stringify(buildJobPayloadConfig(customConfig, selectedSheet, activePreset)));
 
     try {
       const res = await axios.post('/api/jobs/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -803,28 +864,7 @@ export default function Step3Configure() {
   /* ---- estimates ---- */
   const currentRiskMode = customConfig.riskReductionMode || 'none';
   const currentK = customConfig.kThreshold ?? 3;
-  const totalRows = profile?.row_count || profile?.total_rows || 0;
-
-  const uniqueRowsPct = useMemo(() => {
-    if (profile?.k_anonymity?.percent_low_k !== undefined) return Math.round(profile.k_anonymity.percent_low_k * 10) / 10;
-    if (profile?.unique_percent !== undefined) return Math.round(profile.unique_percent * 10) / 10;
-    if (totalRows > 0 && profile?.duplicate_count !== undefined) {
-      return Math.max(1, Math.min(100, Math.round(((totalRows - profile.duplicate_count) / totalRows) * 100 * 0.42)));
-    }
-    return 42;
-  }, [profile, totalRows]);
-
-  const estimatedRowsRemoved = useMemo(() => {
-    if (currentRiskMode !== 'suppress') return 0;
-    const base = totalRows > 0 ? totalRows : 100;
-    return Math.round(base * Math.min(0.95, (uniqueRowsPct / 100) * (0.75 + (currentK - 2) * 0.05)));
-  }, [currentRiskMode, currentK, totalRows, uniqueRowsPct]);
-
-  const estimatedSummaryRows = useMemo(() => {
-    if (currentRiskMode !== 'aggregate') return 0;
-    const base = totalRows > 0 ? totalRows : 100;
-    return Math.max(1, Math.round(base / Math.max(2, currentK * 1.5)));
-  }, [currentRiskMode, currentK, totalRows]);
+  const measuredLowKPercent = profile?.k_anonymity?.percent_low_k ?? null;
 
   const setMode = (mode) => updateConfig({ riskReductionMode: mode, suppressLowK: mode === 'suppress' });
   const onShareKey = (e, idx) => {
@@ -893,7 +933,7 @@ export default function Step3Configure() {
             </button>}>
             Compliance presets
           </Label>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {Object.entries(PRESET_DEFINITIONS).map(([key, preset]) => {
               const on = activePreset === key;
               const pS = presetScores[key]?.privacyScore ?? 90;
@@ -939,8 +979,11 @@ export default function Step3Configure() {
 
         <Card accent={themeSecondary} className="p-5">
           <Label icon={Shield} accent={themeSecondary} right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-theme-dim"><span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: themeAccent }} />LIVE</span>}>
-            Trade-off score
+            Trade-off estimate
           </Label>
+          <p className="mt-2 text-[11px] leading-snug text-theme-dim">
+            Configuration estimate; review measured risk results after processing.
+          </p>
           <div className="mt-4 flex items-center gap-4">
             <div className="relative">
               <ScoreRings privacy={privacyScore} utility={utilityScore} accent={themeAccent} secondary={themeSecondary} />
@@ -984,9 +1027,9 @@ export default function Step3Configure() {
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4" style={{ color: themeAccent }} />
               <h3 id="sharing-selector-title" className="text-sm font-semibold text-theme-text">How will this data be shared?</h3>
-              <InfoTooltip term="sharing-example" text="Example: only one taxi on Business Bay at 3:15 AM -> that row is unique, so it is blurred or removed." />
+              <InfoTooltip term="sharing-example" text="A record can be easier to recognize when its selected quasi-identifiers occur in a small group." />
             </div>
-            <p className="text-xs leading-relaxed text-theme-muted">Even without names, a trip can be recognized if it is the only one at that place and time. This setting prevents that.</p>
+            <p className="text-xs leading-relaxed text-theme-muted">Even without direct identifiers, records can be recognizable when their selected quasi-identifiers form small groups.</p>
           </div>
 
           <div role="radiogroup" aria-labelledby="sharing-selector-title" className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1034,19 +1077,19 @@ export default function Step3Configure() {
           )}
 
           <div data-testid="live-preview-estimate" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <p className="sr-only">
-              At this setting about {uniqueRowsPct}% of rows are unique now; {estimatedRowsRemoved} rows would be removed; {estimatedSummaryRows} summary rows would be produced.
-            </p>
+            <p className="sr-only">Risk and output counts are measured from the processed data, not estimated from a heuristic.</p>
             {[
-              { l: 'Rows unique now', v: uniqueRowsPct, s: '%', c: T.teal },
-              { l: 'Rows removed', v: estimatedRowsRemoved, s: '', c: T.rose },
-              { l: 'Summary rows', v: estimatedSummaryRows, s: '', c: T.sage },
+              { l: 'Rows in groups smaller than 3', v: measuredLowKPercent, s: '%', c: T.teal },
+              { l: 'Rows suppressed', v: null, s: '', c: T.rose },
+              { l: 'Aggregate groups', v: null, s: '', c: T.sage },
             ].map((e) => (
               <div key={e.l} className="relative overflow-hidden rounded-xl border border-theme-border bg-theme-secondary/40 px-4 py-3">
                 <span className="absolute inset-y-0 left-0 w-1" style={{ background: e.c }} />
-                <div className="font-mono text-[10px] tracking-[0.14em] text-theme-dim">Estimate</div>
+                <div className="font-mono text-[10px] tracking-[0.14em] text-theme-dim">Measured after run</div>
                 <div className="mt-0.5 flex items-baseline gap-2">
-                  <span className="text-2xl font-light tabular-nums text-theme-text"><Num value={e.v} suffix={e.s} /></span>
+                  <span className="text-sm font-light tabular-nums text-theme-text">
+                    {e.v === null ? 'UNKNOWN' : <Num value={e.v} suffix={e.s} />}
+                  </span>
                   <span className="text-xs text-theme-muted">{e.l}</span>
                 </div>
               </div>
@@ -1229,6 +1272,10 @@ export default function Step3Configure() {
                         className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-theme-border bg-theme-secondary px-2.5 py-1.5 text-[11px] font-medium text-theme-text transition-colors hover:bg-theme-secondary/70">
                         <Trash2 className="h-3 w-3" style={{ color: T.rose }} /><span className="hidden sm:inline">Remove direct PII</span>
                       </button>
+                      <button type="button" onClick={() => handleBatchAction('keep_all_raw')} title="Keep all fields without dropping or masking"
+                        className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-theme-border bg-theme-secondary px-2.5 py-1.5 text-[11px] font-medium text-theme-text transition-colors hover:bg-theme-secondary/70">
+                        <CheckCircle2 className="h-3 w-3" style={{ color: T.emerald }} /><span className="hidden sm:inline">Keep All Raw</span>
+                      </button>
                       <motion.button type="button" whileTap={{ rotate: -180 }} onClick={() => handleBatchAction('reset_recommendations')} title="Reset all fields to recommended actions" aria-label="Reset all fields to recommended actions"
                         className="cursor-pointer rounded-xl border border-theme-border bg-theme-secondary p-1.5 text-theme-dim transition-colors hover:text-theme-text">
                         <RefreshCw className="h-3.5 w-3.5" />
@@ -1303,6 +1350,21 @@ export default function Step3Configure() {
                                 </span>
                               </div>
                               {pii.reason && <p className="line-clamp-2 text-[11px] leading-relaxed text-theme-dim">{pii.reason}</p>}
+                              <label className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-theme-dim">
+                                Detected type
+                                <select
+                                  aria-label={`Detected type for ${colName}`}
+                                  value={customConfig.columnTypes?.[colName] || pii.semantic_type || 'other'}
+                                  onChange={(event) => pickColumnType(colName, event.target.value)}
+                                  className="rounded-md border border-theme-border bg-theme-secondary px-2 py-1 text-[10px] normal-case tracking-normal text-theme-text"
+                                >
+                                  <option value="direct_identifier">Direct identifier</option>
+                                  <option value="quasi_identifier">Quasi-identifier</option>
+                                  <option value="free_text">Free text</option>
+                                  <option value="numeric_measure">Numeric measure</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </label>
 
                               <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
                                 {raw && action !== 'KEEP' && (
@@ -1321,8 +1383,10 @@ export default function Step3Configure() {
                             <div className="space-y-2.5 border-t border-theme-border/50 pt-3">
                               <div className="flex items-center justify-between">
                                 <span className="text-[10px] font-semibold uppercase tracking-wider text-theme-dim">Privacy action</span>
-                                {action === 'KEEP'
+                                {action === 'KEEP' && pii.category !== 'data_attribute'
                                   ? <span className="flex items-center gap-1 font-mono text-[10px]" style={{ color: T.rose }}><AlertTriangle className="h-3 w-3" /> Unprotected</span>
+                                  : action === 'KEEP'
+                                    ? <span className="font-mono text-[10px]" style={{ color: T.sage }}>Standard attribute retained</span>
                                   : <span className="flex items-center gap-2 font-mono text-[10px] text-theme-dim">{meta.short}<ProtectionMeter level={meta.protect} color={meta.c} /></span>}
                               </div>
 
@@ -1360,7 +1424,9 @@ export default function Step3Configure() {
                                       }
                                     >
                                       <OptIcon className="h-3 w-3 shrink-0" style={{ color: isCurrent ? optMeta.c : undefined }} />
-                                      <span className="truncate max-w-[100px]">{optMeta.short || opt.label.split(' ')[0]}</span>
+                                      <span className="truncate max-w-[100px]">
+                                        {opt.value === 'KEEP' && pii.category === 'data_attribute' ? 'Retained' : optMeta.short || opt.label.split(' ')[0]}
+                                      </span>
                                     </button>
                                   );
                                 })}
@@ -1408,7 +1474,20 @@ export default function Step3Configure() {
                               className={`transition-colors hover:bg-theme-secondary/40 ${isTableDropdownOpen ? 'relative z-50' : 'relative z-1'}`}
                             >
                               <td className="px-3 py-3 font-bold text-theme-text"><Highlight text={colName} q={q} /></td>
-                              <td className="px-3 py-3 font-sans text-xs text-theme-muted"><Highlight text={pii.classification || 'Direct Identifier'} q={q} /></td>
+                              <td className="px-3 py-3">
+                                <select
+                                  aria-label={`Detected type for ${colName}`}
+                                  value={customConfig.columnTypes?.[colName] || pii.semantic_type || 'other'}
+                                  onChange={(event) => pickColumnType(colName, event.target.value)}
+                                  className="rounded-md border border-theme-border bg-theme-secondary px-2 py-1 text-[10px] text-theme-text"
+                                >
+                                  <option value="direct_identifier">Direct identifier</option>
+                                  <option value="quasi_identifier">Quasi-identifier</option>
+                                  <option value="free_text">Free text</option>
+                                  <option value="numeric_measure">Numeric measure</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </td>
                               <td className="px-3 py-3" style={{ color: themeAccent }}>{confOf(pii)}%</td>
                               <td className="px-3 py-3"><span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" style={{ color: rc, background: rgba(rc, 0.14) }}>{risk}</span></td>
                               <td className="px-3 py-3">
@@ -1456,19 +1535,42 @@ export default function Step3Configure() {
                   </Card>
 
                   <Card accent={T.amber} className="space-y-3 p-5">
-                    <Label icon={AlertTriangle} accent={T.amber}>Speed outlier strategy</Label>
-                    <div className="space-y-2">
-                      {OUTLIERS.map((o) => {
-                        const on = customConfig.outlierStrategy === o.v;
+                    <Label icon={AlertTriangle} accent={T.amber}>Required columns</Label>
+                    <p className="text-[11px] text-theme-dim">Rows are rejected only when a selected required field is blank or violates a configured rule. Literal text such as “NA” and “null” is retained.</p>
+                    <div className="max-h-56 space-y-2 overflow-y-auto">
+                      {piiColumns.map((column) => {
+                        const columnName = nameOf(column);
+                        const required = (customConfig.requiredColumns || []).includes(columnName);
+                        const identifier = (customConfig.identifierColumns || []).includes(columnName);
                         return (
-                          <label key={o.v} className="relative flex cursor-pointer items-start gap-3 overflow-hidden rounded-xl border border-theme-border bg-theme-secondary/40 p-3 transition-colors hover:bg-theme-secondary/70">
-                            {on && <motion.span layoutId="outlier-hl" className="absolute inset-0 rounded-xl border" style={{ borderColor: rgba(T.sage, 0.6), background: rgba(T.mint, 0.18) }} transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
-                            <input type="radio" name="outlier" value={o.v} checked={on} onChange={() => updateConfig({ outlierStrategy: o.v })} className="relative mt-0.5 accent-[#5E8F72]" />
-                            <div className="relative">
-                              <span className="flex items-center gap-2 text-xs font-semibold text-theme-text">{o.t}{o.badge && <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: rgba(T.sage, 0.18), color: T.sage }}>{o.badge}</span>}</span>
-                              <p className="mt-0.5 text-[11px] text-theme-dim">{o.d}</p>
-                            </div>
-                          </label>
+                          <div key={columnName} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-theme-text">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={required}
+                                onChange={(event) => {
+                                  const requiredColumns = new Set(customConfig.requiredColumns || []);
+                                  if (event.target.checked) requiredColumns.add(columnName);
+                                  else requiredColumns.delete(columnName);
+                                  updateConfig({ requiredColumns: [...requiredColumns] });
+                                }}
+                              />
+                              <span className="truncate">{columnName} required</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-theme-dim">
+                              <input
+                                type="checkbox"
+                                checked={identifier}
+                                onChange={(event) => {
+                                  const identifierColumns = new Set(customConfig.identifierColumns || []);
+                                  if (event.target.checked) identifierColumns.add(columnName);
+                                  else identifierColumns.delete(columnName);
+                                  updateConfig({ identifierColumns: [...identifierColumns] });
+                                }}
+                              />
+                              Unique identifier
+                            </label>
+                          </div>
                         );
                       })}
                     </div>
@@ -1477,19 +1579,40 @@ export default function Step3Configure() {
 
                 {numericColumns.length > 0 && (
                   <Card className="space-y-4 p-5">
-                    <Label icon={SlidersHorizontal}>Numeric range bounds</Label>
+                    <Label icon={SlidersHorizontal}>Numeric column profile</Label>
+                    <p className="text-[11px] text-theme-dim">Enter bounds only when they are valid for your data. Rows outside selected bounds are rejected with a reason; no values are clamped.</p>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
                       {numericColumns.map((nc) => (
                         <div key={nc.column} className="space-y-2 rounded-xl border border-theme-border bg-theme-secondary/50 p-3">
                           <span className="block font-mono text-xs font-bold text-theme-text">{nc.column}</span>
-                          <div className="h-1 rounded-full" style={{ background: `linear-gradient(90deg, ${T.sage2}, ${T.mint})` }} />
+                          <label className="flex items-center gap-2 text-[10px] text-theme-muted">
+                            <input
+                              type="checkbox"
+                              checked={Object.prototype.hasOwnProperty.call(customConfig.requiredValueRules || {}, nc.column)}
+                              onChange={(event) => {
+                                const requiredValueRules = { ...(customConfig.requiredValueRules || {}) };
+                                if (event.target.checked) requiredValueRules[nc.column] = {};
+                                else delete requiredValueRules[nc.column];
+                                const requiredColumns = new Set(customConfig.requiredColumns || []);
+                                if (event.target.checked) requiredColumns.add(nc.column);
+                                updateConfig({ requiredValueRules, requiredColumns: [...requiredColumns] });
+                              }}
+                            />
+                            Validate required values
+                          </label>
                           <div className="flex items-end gap-2 text-xs">
-                            {[['Min', nc.min], ['Max', nc.max]].map(([l, v], i) => (
-                              <React.Fragment key={l}>
+                            {['minimum', 'maximum'].map((bound, i) => (
+                              <React.Fragment key={bound}>
                                 {i === 1 && <span className="mb-1 text-theme-dim">to</span>}
                                 <div className="space-y-0.5">
-                                  <span className="text-[10px] text-theme-dim">{l}</span>
-                                  <input type="number" defaultValue={v} className="w-20 rounded border border-theme-border bg-theme-card px-2 py-1 font-mono text-xs text-theme-text focus:border-[#5E8F72] focus:outline-none" />
+                                  <span className="text-[10px] text-theme-dim">{bound === 'minimum' ? 'Min' : 'Max'}</span>
+                                  <input
+                                    type="number"
+                                    value={customConfig.requiredValueRules?.[nc.column]?.[bound] ?? ''}
+                                    onChange={(event) => updateNumericRule(nc.column, bound, event.target.value)}
+                                    disabled={!Object.prototype.hasOwnProperty.call(customConfig.requiredValueRules || {}, nc.column)}
+                                    className="w-20 rounded border border-theme-border bg-theme-card px-2 py-1 font-mono text-xs text-theme-text focus:border-[#5E8F72] focus:outline-none disabled:opacity-50"
+                                  />
                                 </div>
                               </React.Fragment>
                             ))}

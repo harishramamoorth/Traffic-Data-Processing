@@ -44,7 +44,7 @@ export function ChartCard({ icon: Icon, title, badge, accent = '#06b6d4', footer
       />
       <div className="relative flex items-center justify-between gap-3">
         <span className="text-xs font-semibold text-theme-text uppercase tracking-wider flex items-center gap-1.5">
-          <Icon className="w-4 h-4 transition-transform duration-300 group-hover:scale-110" style={{ color: accent }} />
+          {Icon && <Icon className="w-4 h-4 transition-transform duration-300 group-hover:scale-110" style={{ color: accent }} />}
           {title}
         </span>
         {badge && <span className="text-[11px] text-theme-dim font-mono">{badge}</span>}

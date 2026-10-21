@@ -19,13 +19,39 @@ function sanitizeCsvCell(val) {
 /**
  * Converts array of JSON objects to a standard CSV string.
  */
-export function jsonToCsv(items) {
+export function jsonToCsv(items, { formatCoordinates = false } = {}) {
   if (!items || !items.length) return '';
   const headers = Object.keys(items[0]);
   const rows = items.map((item) =>
-    headers.map((h) => sanitizeCsvCell(item[h])).join(',')
+    headers.map((h) => {
+      const name = h.toLowerCase();
+      const isCoordinate = name === 'lat' || name === 'latitude' ||
+        name === 'lon' || name === 'lng' || name === 'long' || name === 'longitude' ||
+        name.endsWith('_lat') || name.endsWith('_lon') || name.endsWith('_lng');
+      const value = formatCoordinates && isCoordinate &&
+        item[h] !== null && item[h] !== undefined && item[h] !== '' &&
+        Number.isFinite(Number(item[h]))
+        ? Number(item[h]).toFixed(2)
+        : item[h];
+      return sanitizeCsvCell(value);
+    }).join(',')
   );
   return [headers.join(','), ...rows].join('\r\n');
+}
+
+/**
+ * Generates cleaned download filename preserving the original uploaded file name
+ * with `_cleaned` suffix (e.g. `vendor_data.csv` -> `vendor_data_cleaned.csv`).
+ */
+export function getCleanedDownloadFilename(originalFilename, format = 'csv', isAggregate = false) {
+  const raw = String(originalFilename || 'traffic_data')
+    .replace(/^.*[\\/]/, '')
+    .replace(/\.[^/.]+$/, '');
+  const safeBase = raw.replace(/["'\r\n]/g, '').trim() || 'traffic_data';
+  const cleanedBase = safeBase.endsWith('_cleaned') ? safeBase : `${safeBase}_cleaned`;
+  const suffix = isAggregate ? '_aggregated' : '';
+  const cleanExt = String(format || 'csv').replace(/^\./, '').toLowerCase();
+  return `${cleanedBase}${suffix}.${cleanExt}`;
 }
 
 /**
@@ -53,7 +79,7 @@ export function generateMarkdownAuditReport(job) {
   const qualityChecks = job?.qualityChecks || [];
   const piiReport = job?.piiReport || [];
   const kAnon = job?.kAnonymity || summary?.k_anonymity || {};
-  const risk = summary?.re_identification_risk || kAnon?.risk_badge || 'LOW';
+  const risk = summary?.re_identification_risk || kAnon?.risk_badge || 'UNKNOWN';
   const jobId = job?.id || 'unknown';
   const date = job?.completedAt || new Date().toISOString();
 
@@ -108,6 +134,7 @@ export async function downloadFile({
   filename,
   fallbackData = null,
   fallbackType = 'csv',
+  formatCoordinates = false,
   onToast = null
 }) {
   if (onToast) onToast(`Preparing ${filename}…`, 'info');
@@ -124,12 +151,21 @@ export async function downloadFile({
       throw new Error('Received HTML response instead of file');
     }
 
-    const blob = new Blob([res.data], {
-      type: contentType || (filename.endsWith('.json') ? 'application/json' : 'text/csv')
-    });
-    downloadBlob(blob, filename);
+    let targetFilename = filename;
+    const disposition = res.headers ? res.headers['content-disposition'] : null;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";\r\n]+)"?/i);
+      if (match && match[1]) {
+        targetFilename = match[1].trim();
+      }
+    }
 
-    if (onToast) onToast(`Downloaded ${filename} successfully!`, 'success');
+    const blob = new Blob([res.data], {
+      type: contentType || (targetFilename.endsWith('.json') ? 'application/json' : 'text/csv')
+    });
+    downloadBlob(blob, targetFilename);
+
+    if (onToast) onToast(`Downloaded ${targetFilename} successfully!`, 'success');
     return true;
   } catch (err) {
     console.warn(`[Downloader] Remote download failed for ${url}, switching to client fallback:`, err.message);
@@ -149,10 +185,12 @@ export async function downloadFile({
         } else if (filename.endsWith('.json')) {
           content = JSON.stringify(fallbackData, null, 2);
           mime = 'application/json;charset=utf-8';
+        } else if (filename.endsWith('.xlsx')) {
+          throw new Error('XLSX export requires the server export endpoint.');
         } else {
           // CSV format
           if (Array.isArray(fallbackData) && fallbackData.length > 0) {
-            content = jsonToCsv(fallbackData);
+            content = jsonToCsv(fallbackData, { formatCoordinates });
           } else {
             content = typeof fallbackData === 'string' ? fallbackData : JSON.stringify(fallbackData);
           }

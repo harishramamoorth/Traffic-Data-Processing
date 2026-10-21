@@ -8,10 +8,68 @@ import Step3Configure, {
   getMaskedSampleDisplay,
   buildJobPayloadConfig
 } from '../components/wizard/Step3Configure.jsx';
+import { jsonToCsv, getCleanedDownloadFilename } from '../utils/downloader.js';
 import { useWorkflowStore } from '../store/useWorkflowStore.js';
 import { ToastProvider } from '../components/Toast.jsx';
 
 describe('UI Correctness & Action Filtering (Path 3)', () => {
+  it('generates download filenames using original uploaded file name with _cleaned suffix', () => {
+    expect(getCleanedDownloadFilename('Vendor_Quotes.xlsx', 'csv')).toBe('Vendor_Quotes_cleaned.csv');
+    expect(getCleanedDownloadFilename('Vendor_Quotes.xlsx', 'xlsx')).toBe('Vendor_Quotes_cleaned.xlsx');
+    expect(getCleanedDownloadFilename('traffic_data_2026.csv', 'json')).toBe('traffic_data_2026_cleaned.json');
+    expect(getCleanedDownloadFilename('data_cleaned.csv', 'csv')).toBe('data_cleaned.csv');
+    expect(getCleanedDownloadFilename('sample.csv', 'csv', true)).toBe('sample_cleaned_aggregated.csv');
+  });
+
+  it('formats generalized coordinates to two decimals in CSV exports', () => {
+    const csv = jsonToCsv(
+      [{ latitude: 40.7, longitude: -74 }],
+      { formatCoordinates: true }
+    );
+
+    expect(csv).toBe('latitude,longitude\r\n"40.70","-74.00"');
+  });
+
+  it('shows all profiled columns and distinguishes standard attributes from sensitive fields', () => {
+    const columns = [
+      ['timestamp', 'datetime', 'TIME_BUCKET'],
+      ['latitude', 'coordinates', 'GENERALIZE_SPATIAL'],
+      ['longitude', 'coordinates', 'GENERALIZE_SPATIAL'],
+      ['plate', 'plate_number', 'PSEUDONYMIZE_HMAC'],
+      ['vehicle_type', 'data_attribute', 'KEEP'],
+      ['speed_mph', 'data_attribute', 'KEEP'],
+      ['congestion', 'data_attribute', 'KEEP'],
+      ['road_segment', 'location_identifier', 'REDACT'],
+      ['driver_name', 'driver_name', 'DROP_COLUMN'],
+    ].map(([name, category, default_action]) => ({
+      name,
+      column: name,
+      category,
+      classification: category === 'data_attribute' ? 'Numeric Attribute' : name,
+      default_action,
+      confidence: 0.9,
+      risk_badge: category === 'data_attribute' ? 'LOW' : 'MEDIUM',
+      first_non_null_value: '',
+    }));
+    useWorkflowStore.getState().resetWorkflow();
+    useWorkflowStore.getState().setProfileData({ pii_columns: columns });
+
+    const { container } = render(
+      <ToastProvider>
+        <Step3Configure />
+      </ToastProvider>
+    );
+
+    expect(screen.getByText(/Showing 9 of 9/)).toBeDefined();
+    for (const name of [
+      'timestamp', 'latitude', 'longitude', 'plate', 'vehicle_type',
+      'speed_mph', 'congestion', 'road_segment', 'driver_name',
+    ]) {
+      expect(container.querySelector(`[data-pii-card="${name}"]`)).not.toBeNull();
+    }
+    expect(screen.getAllByText('Standard attribute retained')).toHaveLength(3);
+  });
+
   it('filters action dropdowns strictly by column type', () => {
     // 1. Coordinates: Only GENERALIZE_SPATIAL, DROP_COLUMN, KEEP
     const coordPii = { name: 'latitude', column: 'latitude', category: 'coordinates', classification: 'Geographic Latitude (GPS)' };
@@ -38,10 +96,38 @@ describe('UI Correctness & Action Filtering (Path 3)', () => {
     const plateActions = getAllowedActionsForColumn(platePii).map(a => a.value);
     expect(plateActions).toEqual(['PSEUDONYMIZE_HMAC', 'DROP_COLUMN', 'KEEP']);
 
+    const organizationActions = getAllowedActionsForColumn({
+      name: 'Vendor Name',
+      category: 'organization_name',
+      classification: 'Organization / Vendor Name'
+    }).map(a => a.value);
+    expect(organizationActions).toEqual(['PSEUDONYMIZE_HMAC', 'DROP_COLUMN', 'KEEP']);
+
+    const contactPersonActions = getAllowedActionsForColumn({
+      name: 'Contact Person',
+      category: 'driver_name',
+      classification: 'Contact Person Name'
+    }).map(a => a.value);
+    expect(contactPersonActions).toEqual(['DROP_COLUMN', 'REDACT', 'KEEP']);
+
     // 5. High-risk direct PII (SSN, credit card, DOB): Can be DROP_COLUMN, REDACT, PSEUDONYMIZE_HMAC, KEEP
     const ssnPii = { name: 'driver_ssn', column: 'driver_ssn', category: 'ssn', classification: 'National ID / SSN' };
     const ssnActions = getAllowedActionsForColumn(ssnPii).map(a => a.value);
     expect(ssnActions).toEqual(['DROP_COLUMN', 'REDACT', 'PSEUDONYMIZE_HMAC', 'KEEP']);
+
+    const standardActions = getAllowedActionsForColumn({
+      name: 'speed_mph',
+      category: 'data_attribute',
+      classification: 'Numeric Attribute'
+    }).map(a => a.value);
+    expect(standardActions).toEqual(['KEEP', 'DROP_COLUMN', 'PSEUDONYMIZE_HMAC']);
+
+    const roadActions = getAllowedActionsForColumn({
+      name: 'road_segment',
+      category: 'location_identifier',
+      classification: 'Road / Route Location'
+    }).map(a => a.value);
+    expect(roadActions).toEqual(['REDACT', 'PSEUDONYMIZE_HMAC', 'DROP_COLUMN', 'KEEP']);
   });
 
   it('generates masked samples dynamically from the real first non-null value', () => {
@@ -128,7 +214,7 @@ describe('Risk Reduction & Sharing Option Controls (User Requirements 1-8)', () 
 
     // 1. Title, helper and tooltip
     expect(screen.getByText('How will this data be shared?')).toBeDefined();
-    expect(screen.getByText(/Even without names, a trip can be recognized if it is the only one at that place and time/i)).toBeDefined();
+    expect(screen.getByTestId('live-preview-estimate')).toBeDefined();
 
     // Check radiogroup accessibility
     const radioGroup = screen.getByRole('radiogroup', { name: /How will this data be shared\?/i });
@@ -150,8 +236,8 @@ describe('Risk Reduction & Sharing Option Controls (User Requirements 1-8)', () 
     expect(suppressConfig.riskReductionMode).toBe('suppress');
     expect(suppressConfig.kThreshold).toBe(3);
 
-    // 3. Select "Publish publicly" (maps to aggregate)
-    const publicOption = screen.getByRole('radio', { name: /Publish publicly/i });
+    // 3. Select "Publish aggregates" (maps to aggregate)
+    const publicOption = screen.getByRole('radio', { name: /Publish aggregates/i });
     fireEvent.click(publicOption);
 
     expect(useWorkflowStore.getState().customConfig.riskReductionMode).toBe('aggregate');
@@ -225,7 +311,7 @@ describe('Risk Reduction & Sharing Option Controls (User Requirements 1-8)', () 
     expect(stepperVal.textContent).toBe('2');
   });
 
-  it('renders computed live preview Estimate matching profiled data and selected mode', () => {
+  it('renders measured privacy and output preview guidance', () => {
     render(
       <ToastProvider>
         <Step3Configure />
@@ -234,26 +320,26 @@ describe('Risk Reduction & Sharing Option Controls (User Requirements 1-8)', () 
 
     const estimate = screen.getByTestId('live-preview-estimate');
     expect(estimate).toBeDefined();
-    expect(estimate.textContent).toContain('Estimate');
-    expect(estimate.textContent).toMatch(/At this setting about \d+(\.\d+)?% of rows are unique now; \d+ rows would be removed; \d+ summary rows would be produced\./);
+    expect(estimate.textContent).toContain('Risk and output counts are measured from the processed data, not estimated from a heuristic.');
+    expect(estimate.textContent).toContain('UNKNOWN');
 
-    // When 'none': 0 rows removed and 0 summary rows
+    // Until a job runs, release counts are not measured.
     const internalOption = screen.getByRole('radio', { name: /Internal use only/i });
     fireEvent.click(internalOption);
-    expect(estimate.textContent).toContain('0 rows would be removed; 0 summary rows would be produced.');
+    expect(estimate.textContent).toContain('UNKNOWN');
 
-    // When 'suppress': Y rows removed > 0, 0 summary rows
+    // The app does not fabricate suppression counts.
     const partnerOption = screen.getByRole('radio', { name: /Share with a partner/i });
     fireEvent.click(partnerOption);
-    expect(estimate.textContent).toMatch(/[1-9]\d* rows would be removed; 0 summary rows would be produced\./);
+    expect(estimate.textContent).toContain('UNKNOWN');
 
-    // When 'aggregate': 0 rows removed, Z summary rows > 0
-    const publicOption = screen.getByRole('radio', { name: /Publish publicly/i });
+    // Aggregate outputs are counted after the selected data is processed.
+    const publicOption = screen.getByRole('radio', { name: /Publish aggregates/i });
     fireEvent.click(publicOption);
-    expect(estimate.textContent).toMatch(/0 rows would be removed; [1-9]\d* summary rows would be produced\./);
+    expect(estimate.textContent).toContain('UNKNOWN');
   });
 
-  it('provides an accessible info tooltip with the taxi on Business Bay example', () => {
+  it('provides an accessible generic quasi-identifier tooltip', () => {
     render(
       <ToastProvider>
         <Step3Configure />
@@ -267,7 +353,7 @@ describe('Risk Reduction & Sharing Option Controls (User Requirements 1-8)', () 
     fireEvent.mouseEnter(tooltipBtn);
     const tooltipContent = screen.getByRole('tooltip');
     expect(tooltipContent).toBeDefined();
-    expect(tooltipContent.textContent).toContain('Example: only one taxi on Business Bay at 3:15 AM -> that row is unique, so it is blurred or removed.');
+    expect(tooltipContent.textContent).toContain('selected quasi-identifiers occur in a small group.');
   });
 });
 
@@ -313,4 +399,3 @@ describe('Truthful Copy & Banned Phrases Audit', () => {
     expect(violations).toEqual([]);
   });
 });
-

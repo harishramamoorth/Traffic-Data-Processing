@@ -16,7 +16,7 @@ import { useWorkflowStore } from '../../store/useWorkflowStore';
 import { useToast } from '../Toast';
 import PageLoader from '../PageLoader';
 import AuraKpiCards from '../3d/AuraKpiCards';
-import { downloadFile } from '../../utils/downloader';
+import { downloadFile, getCleanedDownloadFilename } from '../../utils/downloader';
 
 /* ────────────────────────────────────────────────────────────────
    THEME LAYER
@@ -623,6 +623,9 @@ export default function Step5Results() {
   const rowsOut = summary.processed_rows ?? 0;
   const dupes = summary.duplicates_removed ?? summary.duplicate_rows_removed ?? job.duplicatesRemoved ?? 0;
   const rejected = summary.rejected_rows_count ?? rejectedRows.length;
+  const missingRequiredRejected = rejectedRows.filter((row) =>
+    String(row.reason || '').startsWith('missing_required_field')
+  ).length;
   const suppressed = job.suppressedCount ?? summary.suppressed_count ?? 0;
 
   const hasFail = qualityChecks.some((q) => q.status === 'FAIL');
@@ -678,8 +681,8 @@ export default function Step5Results() {
     const inspCounts = job.inspection?.null_counts || {};
     const inspPcts = job.inspection?.null_percentages || {};
     const nullReport = job.nullReport || job.summary?.null_report || {};
-    const totalIn = summary.original_rows || rowsIn || 527;
-    const totalOut = summary.processed_rows || rowsOut || 518;
+    const totalIn = summary.original_rows ?? rowsIn;
+    const totalOut = summary.processed_rows ?? rowsOut;
 
     const candidateCols = Array.from(new Set([
       ...Object.keys(inspCounts),
@@ -696,14 +699,14 @@ export default function Step5Results() {
         if (inspPcts[col] !== undefined) {
           before = Number(inspPcts[col]);
         } else if (inspCounts[col] !== undefined) {
-          before = Number(((inspCounts[col] / totalIn) * 100).toFixed(1));
+          before = totalIn > 0 ? Number(((inspCounts[col] / totalIn) * 100).toFixed(1)) : 0;
         }
 
         let after = 0;
         if (nullReport[col]?.null_pct !== undefined) {
           after = Number(nullReport[col].null_pct);
         } else if (nullReport[col]?.null_count !== undefined) {
-          after = Number(((nullReport[col].null_count / totalOut) * 100).toFixed(1));
+          after = totalOut > 0 ? Number(((nullReport[col].null_count / totalOut) * 100).toFixed(1)) : 0;
         }
 
         return {
@@ -795,11 +798,11 @@ export default function Step5Results() {
   const privacyActionsData = useMemo(() => {
     if (analytics?.privacyActions?.length) return analytics.privacyActions;
     return [
-      { name: 'HMAC Pseudonymized', count: rowsOut || 518 },
-      { name: 'Direct PII Dropped', count: rowsOut || 518 },
-      { name: 'GPS Generalized', count: rowsOut || 518 },
-      { name: 'Time Floored (15m)', count: Math.round((rowsOut || 518) * 0.8) },
-      { name: 'Free-Text Scrubbed', count: Math.round((rowsOut || 518) * 0.65) }
+      { name: 'HMAC Pseudonymized', count: rowsOut },
+      { name: 'Direct PII Dropped', count: rowsOut },
+      { name: 'GPS Generalized', count: rowsOut },
+      { name: 'Time Floored (15m)', count: Math.round(rowsOut * 0.8) },
+      { name: 'Free-Text Scrubbed', count: Math.round(rowsOut * 0.65) }
     ];
   }, [analytics, rowsOut]);
 
@@ -886,13 +889,16 @@ export default function Step5Results() {
 
   /* downloads */
   const dl = (format, type = 'row') => {
-    const filename = type === 'aggregate' ? `aggregated.${format}` : `cleaned_${jobId}.${format}`;
-    const fallbackData = type === 'aggregate'
-      ? (job.aggregatedRecords || [])
+    const isAgg = type === 'aggregate' || (job?.config?.riskReductionMode || job?.config?.risk_reduction_mode) === 'aggregate';
+    const effectiveType = isAgg ? 'aggregate' : type;
+    const rawName = file?.name || originalFilename || job?.originalFilename || 'traffic_data';
+    const filename = getCleanedDownloadFilename(rawName, format, isAgg);
+    const fallbackData = effectiveType === 'aggregate'
+      ? (job?.aggregatedRecords || [])
       : (records && records.length > 0 ? records : (sessionSample?.after || []));
 
     downloadFile({
-      url: `/api/jobs/${jobId}/download?format=${format}&type=${type}`,
+      url: `/api/jobs/${jobId}/download?format=${format}&type=${effectiveType}`,
       filename,
       fallbackData,
       fallbackType: format,
@@ -1142,6 +1148,13 @@ export default function Step5Results() {
                   onCard2Click={() => setModal('output')}
                   onCard3Click={() => setTab('pii_report')}
                 />
+                {rejected > 0 && (
+                  <p className="mt-2 text-xs text-theme-dim">
+                    {rejected} row(s) were rejected.
+                    {missingRequiredRejected > 0 && ` ${missingRequiredRejected} had missing required fields.`}
+                    {missingRequiredRejected === 0 && ' See Rejected rows for the reasons.'}
+                  </p>
+                )}
               </motion.div>
               {Notices}
               {Flow}
@@ -1372,7 +1385,7 @@ export default function Step5Results() {
                   <ChartBox title="Privacy actions applied" icon={ShieldCheck} badge="Transformed" sub="Row count subjected to masking" isCustom={true}>
                     <div className="space-y-3 pt-1">
                       {privacyActionsData.map((item, i) => {
-                        const max = rowsOut || 518;
+                        const max = Math.max(rowsOut, 1);
                         const pct = Math.min(100, Math.round((item.count / max) * 100));
                         return (
                           <div key={item.name} className="space-y-1 group">
@@ -1755,9 +1768,11 @@ export default function Step5Results() {
             <Section title="Downloads" hint="Verified datasets and audit documents for this run.">
               <motion.div variants={stagger} initial="hidden" animate="show" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {[
+                  { icon: FileSpreadsheet, title: 'Cleaned Excel (.xlsx)', desc: `Excel workbook, ${rowsOut.toLocaleString()} rows formatted.`, tag: 'XLSX', t: 'ok', onClick: () => dl('xlsx') },
                   { icon: FileSpreadsheet, title: 'Cleaned CSV', desc: `Row-level data, ${rowsOut.toLocaleString()} rows, ready for analytics.`, tag: 'CSV', t: 'a', primary: true, onClick: () => dl('csv') },
                   { icon: FileCode, title: 'Cleaned JSON', desc: 'Documents for API or database import.', tag: 'JSON', t: 'info', onClick: () => dl('json') },
                   ...(hasAgg ? [
+                    { icon: FileSpreadsheet, title: 'Aggregated Excel (.xlsx)', desc: `Hourly road-segment workbook, k ≥ ${K}.`, tag: 'XLSX', t: 'ok', onClick: () => dl('xlsx', 'aggregate') },
                     { icon: FileSpreadsheet, title: 'Aggregated CSV', desc: `Hourly road-segment stats, k ≥ ${K}.`, tag: 'CSV', t: 'ok', onClick: () => dl('csv', 'aggregate') },
                     { icon: FileCode, title: 'Aggregated JSON', desc: 'Aggregates only. No row-level identifiers.', tag: 'JSON', t: 'ok', onClick: () => dl('json', 'aggregate') }] : []),
                   { icon: FileText, title: 'Audit report (Markdown)', desc: 'Quality checks, PII actions and risk audit.', tag: 'MD', t: 'warn', onClick: () => dlReport('markdown') },
